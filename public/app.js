@@ -371,7 +371,9 @@ function splitName(n) {
   n = String(n || "").replace(/\s+/g, " ").trim();
   if (!n || BADNAMES.has(n.toLowerCase())) return ["", ""];
   const t = n.split(" "); if (t.length === 1 || / and /i.test(n)) return [n, ""];
-  let first = t.slice(0, -1).join(" "), last = t[t.length - 1];
+  let suffix = "";
+  if (t.length > 2 && /^(jr|sr|ii|iii|iv)\.?$/i.test(t[t.length - 1])) suffix = " " + t.pop();
+  let first = t.slice(0, -1).join(" "), last = t[t.length - 1] + suffix;
   if (last === last.toLowerCase()) last = last[0].toUpperCase() + last.slice(1);
   if (first === first.toLowerCase()) first = first[0].toUpperCase() + first.slice(1);
   return [first, last];
