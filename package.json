@@ -1,0 +1,10 @@
+{
+  "name": "aldora-card-file",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Aldora Card File: business card scanning and rep contact lists with per-rep access",
+  "dependencies": {
+    "@netlify/blobs": "11.1.3"
+  }
+}
