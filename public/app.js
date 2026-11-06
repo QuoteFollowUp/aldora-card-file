@@ -16,6 +16,12 @@ function isDue(c) { return c.followUp && c.followUp <= today() && c.status !== "
 function digits(p) { return String(p || "").replace(/[^\d+]/g, ""); }
 function money(n) { n = +n || 0; return n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + n; }
 function fmtDate(s) { return s ? new Date(s + "T12:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : ""; }
+const normCo = (s) => String(s || "").toLowerCase().replace(/\b(inc|llc|co|corp|company|incorporated|ltd|the|dba)\b\.?/g, "").replace(/[^a-z0-9]/g, "");
+const fmtPhones = (c) => (c.phones || []).map((p) => `${p.label ? p.label + ": " : ""}${p.number}`).join("; ");
+const oneAddr = (a) => [a.address, [[a.city, a.state].filter(Boolean).join(", "), a.zip].filter(Boolean).join(" ")].filter(Boolean).join("\n");
+const fmtAddrs = (c) => (c.addresses || []).map((a) => `${a.label ? a.label + ": " : ""}${oneAddr(a).replace(/\n/g, ", ")}`).join("; ");
+function personName(c) { return [c.first, c.last].filter(Boolean).join(" "); }
+function primaryPhone(c) { return c.office || c.mobile || ((c.phones || [])[0] || {}).number || ""; }
 async function copy(text, label) { try { await navigator.clipboard.writeText(text); toast((label || "Text") + " copied"); } catch { toast("Copy blocked. Press and hold the text to copy it."); } }
 function download(name, text) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
 const csvCell = (x) => `"${String(x ?? "").replace(/"/g, '""')}"`;
@@ -82,7 +88,7 @@ function baseFiltered() {
     if (br && c.branch !== br) return false;
     if (rp && c.rep !== rp) return false;
     if (pr) { if (pr.startsWith("sf:")) { if (c.sfStatus !== pr.slice(3)) return false; } else if (!(c.products || []).includes(pr)) return false; }
-    if (q && ![c.first, c.last, c.title, c.company, c.email, c.city, c.state, c.notes, c.met, c.category, c.mobile, c.office, c.rep, c.branch, c.replacedBy].join(" ").toLowerCase().includes(q)) return false;
+    if (q && ![c.first, c.last, c.title, c.company, c.email, c.city, c.state, c.notes, c.met, c.category, c.mobile, c.office, c.rep, c.branch, c.replacedBy, fmtPhones(c), fmtAddrs(c)].join(" ").toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -112,7 +118,7 @@ function renderList() {
   $("count").textContent = loaded ? `${cards.filter((c) => c.status !== "left").length.toLocaleString()} contacts` : "Loading…";
   $("list").innerHTML = v.slice(0, shown).map((c) => `<li><button class="row${c.status === "left" ? " left" : ""}" type="button" data-id="${esc(c.id)}">
     <span class="thumb"${c.hasPhoto ? ' style="background:var(--accent-soft)" title="Card photo on file"' : ""}></span>
-    <span class="who"><div class="name">${esc(fullName(c))}</div><div class="co">${esc([c.first || c.last ? c.company : "", mgr ? c.rep : c.title].filter(Boolean).join(" · "))}</div></span>
+    <span class="who"><div class="name">${esc(c.company || personName(c) || "Unnamed contact")}</div><div class="co2">${esc(c.company ? [personName(c) || "No contact name", c.title].filter(Boolean).join(" · ") : c.title || "")}</div><div class="ph">${esc([primaryPhone(c), mgr ? c.rep : ""].filter(Boolean).join(" · "))}</div></span>
     <span class="meta">${c.status === "left" ? `<span class="tag gone">Left</span>` : isDue(c) ? `<span class="tag due">Follow up</span>` : `<span class="tag">${esc(c.category || "Unassigned")}</span>`}${c.branch || c.city ? `<span class="loc">${esc(mgr ? c.branch : [c.city, c.state].filter(Boolean).join(", ") || c.branch)}</span>` : ""}</span>
   </button></li>`).join("");
   $("more").hidden = v.length <= shown; $("more").textContent = `Show more (${(v.length - shown).toLocaleString()} left)`;
@@ -144,8 +150,8 @@ $("emailGroup").onclick = () => {
 $("groupBatches").addEventListener("click", (e) => { const b = e.target.closest("[data-b]"); if (!b) return; const i = +b.dataset.b; copy(groupAddrs.slice(i * BATCH, (i + 1) * BATCH).join("; "), `Batch ${i + 1}`); });
 $("closeGroup").onclick = () => ($("grouppanel").hidden = true);
 $("exportBtn").onclick = () => {
-  const head = ["First","Last","Title","Company","Email","Mobile","Office","Website","Address","City","State","Zip","Account type","Branch","Sales rep","Status","Replaced by","Products","Storefront status","Last call","Calls logged","Open quotes","Open quote $","Storefront quote $","Where met","Follow up","Notes"];
-  const rows = visible().map((c) => [c.first,c.last,c.title,c.company,c.email,c.mobile,c.office,c.website,c.address,c.city,c.state,c.zip,c.category,c.branch,c.rep,c.status === "left" ? "Left company" : "Active",c.replacedBy,(c.products || []).join("; "),c.sfStatus,c.lastCall,c.calls,c.openQuotes,c.openQuoteUsd,c.sfQuoteUsd,c.met,c.followUp,c.notes]);
+  const head = ["First","Last","Title","Company","Email","Mobile","Office","Other phones","Website","Address","City","State","Zip","Other addresses","Account type","Branch","Sales rep","Status","Replaced by","Products","Storefront status","Last call","Calls logged","Open quotes","Open quote $","Storefront quote $","Where met","Follow up","Notes"];
+  const rows = visible().map((c) => [c.first,c.last,c.title,c.company,c.email,c.mobile,c.office,fmtPhones(c),c.website,c.address,c.city,c.state,c.zip,fmtAddrs(c),c.category,c.branch,c.rep,c.status === "left" ? "Left company" : "Active",c.replacedBy,(c.products || []).join("; "),c.sfStatus,c.lastCall,c.calls,c.openQuotes,c.openQuoteUsd,c.sfQuoteUsd,c.met,c.followUp,c.notes]);
   download(`aldora-contacts-${today()}.csv`, [head, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n"));
 };
 
@@ -184,12 +190,33 @@ $("f_category").innerHTML = CATS.map((c) => `<option>${esc(c)}</option>`).join("
 $("f_branch").innerHTML = `<option value="">None</option>` + BRANCHES.map((b) => `<option>${esc(b)}</option>`).join("");
 const FIELDS = ["first","last","title","company","email","mobile","office","website","address","city","state","zip","category","branch","rep","followUp","met","notes"];
 const fid = (k) => (k === "followUp" ? "f_followup" : "f_" + k);
+let xid = 0;
+function addPhoneRow(p = {}) {
+  const i = ++xid, el = document.createElement("div"); el.className = "xrow ph-row";
+  el.innerHTML = `<div class="f"><label for="xpl${i}">Label</label><input id="xpl${i}" class="xl" placeholder="Shop, Cell 2, Fax" value="${esc(p.label || "")}"></div><div class="f"><label for="xpn${i}">Phone</label><input id="xpn${i}" class="xn" type="tel" value="${esc(p.number || "")}"></div><button class="x" type="button" aria-label="Remove phone">Remove</button>`;
+  $("xPhones").appendChild(el); return el;
+}
+function addAddrRow(a = {}) {
+  const i = ++xid, el = document.createElement("div"); el.className = "xrow adr ad-row";
+  el.innerHTML = `<div class="f"><label for="xal${i}">Label</label><input id="xal${i}" class="xl" placeholder="Shop, Warehouse, Bill-to" value="${esc(a.label || "")}"></div><div class="f"><label for="xaz${i}">Zip</label><input id="xaz${i}" class="xz" inputmode="numeric" maxlength="10" value="${esc(a.zip || "")}"></div><button class="x" type="button" aria-label="Remove address">Remove</button>
+  <div class="f full2"><label for="xas${i}">Street address</label><input id="xas${i}" class="xs" value="${esc(a.address || "")}"></div>
+  <div class="f"><label for="xac${i}">City</label><input id="xac${i}" class="xc" value="${esc(a.city || "")}"></div><div class="f"><label for="xat${i}">State</label><input id="xat${i}" class="xt" maxlength="20" value="${esc(a.state || "")}"></div>`;
+  $("xAddrs").appendChild(el); return el;
+}
+function readPhones() { return [...$("xPhones").querySelectorAll(".ph-row")].map((r) => ({ label: r.querySelector(".xl").value.trim(), number: r.querySelector(".xn").value.trim() })).filter((p) => p.number); }
+function readAddrs() { return [...$("xAddrs").querySelectorAll(".ad-row")].map((r) => ({ label: r.querySelector(".xl").value.trim(), address: r.querySelector(".xs").value.trim(), city: r.querySelector(".xc").value.trim(), state: r.querySelector(".xt").value.trim().toUpperCase(), zip: r.querySelector(".xz").value.trim() })).filter((a) => a.address || a.city); }
+$("addPhone").onclick = () => addPhoneRow().querySelector(".xl").focus();
+$("addAddr").onclick = () => addAddrRow().querySelector(".xl").focus();
+["xPhones", "xAddrs"].forEach((id) => $(id).addEventListener("click", (e) => { const b = e.target.closest(".x"); if (b) b.closest(".xrow").remove(); }));
 function openEdit(c, preset) {
   editing = c; pendingPhoto = null; readJob++;
   $("editTitle").textContent = c ? "Edit contact" : "New card";
   FIELDS.forEach((k) => ($(fid(k)).value = c ? c[k] || "" : ""));
+  $("xPhones").innerHTML = ""; $("xAddrs").innerHTML = "";
+  ((c && c.phones) || (preset && preset.phones) || []).forEach((p) => addPhoneRow(p));
+  ((c && c.addresses) || (preset && preset.addresses) || []).forEach((a) => addAddrRow(a));
   if (!c) { $("f_category").value = "Commercial Glazier"; $("f_branch").value = me.branch || ""; if (me.role === "rep") $("f_rep").value = me.name; }
-  if (preset) for (const k in preset) if ($(fid(k))) $(fid(k)).value = preset[k] ?? "";
+  if (preset) for (const k in preset) if (FIELDS.includes(k)) $(fid(k)).value = preset[k] ?? "";
   $("f_branch").disabled = me.role === "branch";
   $("editPhoto").hidden = true; $("readStatus").hidden = true; $("saveBtn").disabled = false;
   if (c && c.hasPhoto) loadPhoto(c, $("editPhoto"));
@@ -203,18 +230,20 @@ $("form").addEventListener("submit", async (e) => {
   const data = {}; FIELDS.forEach((k) => (data[k] = $(fid(k)).value.trim()));
   data.state = data.state.toUpperCase();
   if (me.role !== "admin") delete data.rep;
+  const lists = { phones: readPhones(), addresses: readAddrs() };
   if (!data.first && !data.last && !data.company) { toast("Add a name or a company before saving."); return; }
   $("saveBtn").disabled = true;
   try {
     if (editing) {
       const patch = {}; for (const k in data) if ((editing[k] || "") !== data[k]) patch[k] = data[k];
+      for (const k in lists) if (JSON.stringify(editing[k] || []) !== JSON.stringify(lists[k])) patch[k] = lists[k];
       if (me.role !== "admin") delete patch.branch;
       if (pendingPhoto) patch.photo = pendingPhoto;
       if (!Object.keys(patch).length) { $("edit").hidden = true; if ($("detail").hidden) closeSheets(); return; }
       const { contact } = await api("contacts/" + encodeURIComponent(editing.id), { method: "PUT", body: { shard: editing.shard, patch } });
       upsertLocal(contact); $("edit").hidden = true; toast("Contact updated"); openDetail(contact.id);
     } else {
-      const { contact } = await api("contacts", { method: "POST", body: { contact: { ...data, photo: pendingPhoto || "" } } });
+      const { contact } = await api("contacts", { method: "POST", body: { contact: { ...data, ...lists, photo: pendingPhoto || "" } } });
       upsertLocal(contact); closeSheets(); toast(`${fullName(contact)} filed`);
     }
   } catch (err) { $("saveBtn").disabled = false; toast(err.message); }
@@ -227,18 +256,30 @@ async function loadPhoto(c, imgEl) {
   try { const p = photoCache[c.id] || (photoCache[c.id] = (await api(`contacts/${encodeURIComponent(c.id)}/photo?shard=${encodeURIComponent(c.shard)}`)).photo); imgEl.src = p; imgEl.hidden = false; } catch {}
 }
 function infoRows(el, lines, copyable) {
-  el.innerHTML = lines.map((l, i) => `<div class="ln"><dt>${l[0]}</dt><dd class="${l[2] ? "num" : ""}" style="white-space:pre-line">${esc(l[1])}</dd>${copyable.includes(l[0]) ? `<button class="copy" type="button" data-i="${i}">Copy</button>` : "<span></span>"}</div>`).join("");
+  const canCopy = (l) => copyable ? copyable.includes(l[0]) : l[3] === "tel" || l[0] === "Email" || /\n|\d{5}/.test(l[1]) && !/^(Met|Notes|Replaced by)$/.test(l[0]);
+  el.innerHTML = lines.map((l, i) => `<div class="ln"><dt>${esc(l[0])}</dt><dd class="${l[2] ? "num" : ""}" style="white-space:pre-line">${l[3] === "tel" ? `<a href="tel:${esc(digits(String(l[1]).split(" x")[0]))}">${esc(l[1])}</a>` : esc(l[1])}</dd>${canCopy(l) ? `<button class="copy" type="button" data-i="${i}">Copy</button>` : "<span></span>"}</div>`).join("");
   el.onclick = (e) => { const b = e.target.closest(".copy"); if (b) { const l = lines[+b.dataset.i]; copy(l[1], l[0]); } };
 }
 function openDetail(id) {
   const c = cards.find((x) => x.id === id); if (!c) return; current = c;
-  $("dName").textContent = fullName(c); $("dTitle").textContent = c.title || ""; $("dCompany").textContent = c.first || c.last ? c.company || "" : "";
+  $("dName").textContent = c.company || personName(c) || "Unnamed contact";
+  $("dCompany").textContent = c.company ? personName(c) || "No contact name" : ""; $("dCompany").className = "c person";
+  $("dTitle").textContent = c.title || "";
   const sfLabel = { GAP: "Storefront gap", ADD: "Storefront quoted, untagged", Aligned: "Storefront aligned" }[c.sfStatus];
   $("dTags").innerHTML = (c.status === "left" ? `<span class="tag gone">Left company ${esc(fmtDate(c.leftDate))}</span>` : "") + `<span class="tag">${esc(c.category || "Unassigned")}</span>` + (sfLabel ? `<span class="tag${c.sfStatus === "GAP" ? " due" : ""}">${sfLabel}</span>` : "") + (c.followUp ? `<span class="tag${isDue(c) ? " due" : ""}">Follow up ${esc(fmtDate(c.followUp))}</span>` : "");
-  const phone = c.mobile || c.office;
+  const phone = c.mobile || c.office || ((c.phones || [])[0] || {}).number;
   $("qEmail").href = c.email ? "mailto:" + encodeURIComponent(c.email) : "#"; $("qEmail").style.opacity = c.email ? 1 : 0.4;
   $("qCall").href = phone ? "tel:" + digits(phone.split(" x")[0]) : "#"; $("qCall").style.opacity = phone ? 1 : 0.4;
-  infoRows($("dInfo"), [["Email", c.email, 0], ["Mobile", c.mobile, 1], ["Office", c.office, 1], ["Website", c.website, 0], ["Address", [c.address, [[c.city, c.state].filter(Boolean).join(", "), c.zip].filter(Boolean).join(" ")].filter(Boolean).join("\n"), 0], ["Replaced by", c.replacedBy, 0], ["Met", c.met, 0], ["Notes", c.notes, 0]].filter((l) => l[1]), ["Email", "Mobile", "Office", "Address"]);
+  const lines = [["Email", c.email, 0], ["Mobile", c.mobile, 1, "tel"], ["Office", c.office, 1, "tel"]];
+  (c.phones || []).forEach((p) => lines.push([p.label || "Phone", p.number, 1, "tel"]));
+  lines.push(["Website", c.website, 0], ["Address", oneAddr(c), 0]);
+  (c.addresses || []).forEach((a) => lines.push([a.label || "Address", oneAddr(a), 0]));
+  lines.push(["Replaced by", c.replacedBy, 0], ["Met", c.met, 0], ["Notes", c.notes, 0]);
+  infoRows($("dInfo"), lines.filter((l) => l[1]), null);
+  const co = normCo(c.company), others = co ? cards.filter((x) => x.id !== c.id && normCo(x.company) === co).sort((a, b) => (a.status === "left") - (b.status === "left") || personName(a).localeCompare(personName(b))) : [];
+  $("dCoLbl").textContent = others.length ? `${others.length} other contact${others.length === 1 ? "" : "s"} at ${c.company}` : c.company ? `No other contacts at ${c.company}` : "Company";
+  $("dCoList").innerHTML = others.map((x) => `<li><button class="row${x.status === "left" ? " left" : ""}" type="button" data-id="${esc(x.id)}" style="grid-template-columns:1fr auto"><span class="who"><div class="name">${esc(personName(x) || "No contact name")}</div><div class="co2">${esc([x.title, x.email].filter(Boolean).join(" · "))}</div></span><span class="meta">${x.status === "left" ? `<span class="tag gone">Left</span>` : `<span class="loc">${esc(x.mobile || x.office || "")}</span>`}</span></button></li>`).join("");
+  $("dAddCo").hidden = !c.company;
   const acct = [["Branch", c.branch, 0], ["Rep", c.rep, 0], ["Top focus", c.topGroup, 0], ["Products", (c.products || []).join(", "), 0], ["Last call", fmtDate(c.lastCall), 1], ["Calls", c.calls ? String(c.calls) : "", 1], ["Open quotes", c.openQuotes ? `${c.openQuotes} · ${money(c.openQuoteUsd)}` : "", 1], ["Storefront $", c.sfQuoteUsd ? money(c.sfQuoteUsd) : "", 1], ["Last edit", c.updatedBy ? `${c.updatedBy}, ${new Date(c.updated).toLocaleDateString()}` : "", 0]].filter((l) => l[1]);
   $("dAcctWrap").hidden = !acct.length; infoRows($("dAcct"), acct, []);
   $("dPhoto").hidden = true; if (c.hasPhoto) loadPhoto(c, $("dPhoto"));
@@ -249,6 +290,12 @@ function openDetail(id) {
 $("qEmail").addEventListener("click", (e) => { if (!current || !current.email) { e.preventDefault(); toast("No email on this contact."); } });
 $("qCall").addEventListener("click", (e) => { if (!current || !(current.mobile || current.office)) { e.preventDefault(); toast("No phone on this contact."); } });
 $("dBack").onclick = closeSheets;
+$("dCoList").addEventListener("click", (e) => { const b = e.target.closest(".row"); if (b) openDetail(b.dataset.id); });
+$("dAddCo").onclick = () => {
+  const c = current;
+  openEdit(null, { company: c.company, category: c.category || "Commercial Glazier", branch: c.branch, rep: c.rep || "", office: c.office, website: c.website, address: c.address, city: c.city, state: c.state, zip: c.zip, phones: (c.phones || []).filter((p) => !/cell|mobile/i.test(p.label)), addresses: c.addresses || [] });
+  $("editTitle").textContent = "New contact at " + c.company; $("detail").hidden = true;
+};
 $("dEdit").onclick = () => openEdit(current);
 $("dLeft").onclick = async () => {
   if (current.status === "left") {

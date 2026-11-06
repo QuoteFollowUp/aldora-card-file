@@ -22,6 +22,14 @@ const UNASSIGNED = "_unassigned";
 const TOKEN_DAYS = 60;
 const EDITABLE = ["first", "last", "title", "company", "email", "mobile", "office", "website", "address", "city", "state", "zip", "category", "followUp", "met", "notes"];
 const ADMIN_ONLY = ["rep", "branch"];
+const LISTS = ["phones", "addresses"];
+// Extra phones: [{label, number}]. Extra addresses: [{label, address, city, state, zip}].
+function cleanList(k, v) {
+  if (!Array.isArray(v)) return [];
+  const t = (x, n) => String(x ?? "").trim().slice(0, n);
+  if (k === "phones") return v.slice(0, 10).map((p) => ({ label: t(p.label, 40), number: t(p.number, 40) })).filter((p) => p.number);
+  return v.slice(0, 10).map((a) => ({ label: t(a.label, 40), address: t(a.address, 200), city: t(a.city, 80), state: t(a.state, 20).toUpperCase(), zip: t(a.zip, 12) })).filter((a) => a.address || a.city);
+}
 const REP_ALIASES = { "jim wanamaker": "Jim Wannamaker" };
 
 const store = () => getStore({ name: STORE, consistency: "strong" });
@@ -106,7 +114,8 @@ function canSee(user, shard, contact) {
 
 // ---------- contact helpers ----------
 function clean(c) { const o = { ...c }; delete o.photo; return o; }
-function diff(a, b, keys) { const d = {}; for (const k of keys) { const x = a[k] ?? "", y = b[k] ?? ""; if (String(x) !== String(y)) d[k] = [x, y]; } return d; }
+const fmtList = (k, v) => (v || []).map((x) => k === "phones" ? `${x.label ? x.label + ": " : ""}${x.number}` : `${x.label ? x.label + ": " : ""}${[x.address, x.city, x.state, x.zip].filter(Boolean).join(", ")}`).join("; ");
+function diff(a, b, keys) { const d = {}; for (const k of keys) { if (LISTS.includes(k)) { const x = fmtList(k, a[k]), y = fmtList(k, b[k]); if (x !== y) d[k] = [x, y]; continue; } const x = a[k] ?? "", y = b[k] ?? ""; if (String(x) !== String(y)) d[k] = [x, y]; } return d; }
 async function savePhoto(shard, id, dataUrl) {
   if (!dataUrl) return false;
   if (!/^data:image\/(jpeg|png|webp);base64,/.test(dataUrl) || dataUrl.length > 600000) throw new Error("Photo format not accepted.");
@@ -191,6 +200,7 @@ export default async (req) => {
 
     if (parts[0] === "contacts" && !parts[1] && method === "POST") {
       const c = {}; for (const k of EDITABLE) c[k] = String(body.contact?.[k] ?? "").trim().slice(0, 2000);
+      for (const k of LISTS) c[k] = cleanList(k, body.contact?.[k]);
       if (!c.first && !c.last && !c.company) return err(400, "Add a name or a company.");
       let shard, rep, branch;
       if (user.role === "rep") { shard = user.slug; rep = user.name; branch = String(body.contact?.branch || user.branch || ""); }
@@ -222,8 +232,9 @@ export default async (req) => {
           const cur = d.contacts[id]; if (!cur) throw Object.assign(new Error("Contact not found."), { status: 404 });
           const next = { ...cur };
           for (const k of EDITABLE) if (patch[k] !== undefined) next[k] = String(patch[k]).trim().slice(0, 2000);
+          for (const k of LISTS) if (patch[k] !== undefined) next[k] = cleanList(k, patch[k]);
           if (isAdmin) for (const k of ADMIN_ONLY) if (patch[k] !== undefined) next[k] = k === "rep" ? canonRep(patch[k]) : String(patch[k]).trim();
-          changes = diff(cur, next, [...EDITABLE, ...ADMIN_ONLY]);
+          changes = diff(cur, next, [...EDITABLE, ...LISTS, ...ADMIN_ONLY]);
           next.editedFields = [...new Set([...(cur.editedFields || []), ...Object.keys(changes).filter((k) => !ADMIN_ONLY.includes(k))])];
           next.updated = now(); next.updatedBy = user.name;
           out = next;

@@ -188,10 +188,14 @@
       <div class="f full"><label for="f_email">Email</label><input id="f_email" type="email" inputmode="email"></div>
       <div class="f"><label for="f_mobile">Mobile</label><input id="f_mobile" type="tel"></div>
       <div class="f"><label for="f_office">Office</label><input id="f_office" type="tel"></div>
+      <div class="f full extras" id="xPhones"></div>
+      <div class="f full"><button class="textbtn addx" type="button" id="addPhone">+ Add another phone</button></div>
       <div class="f full"><label for="f_website">Website</label><input id="f_website"></div>
       <div class="f full"><label for="f_address">Street address</label><input id="f_address"></div>
       <div class="f"><label for="f_city">City</label><input id="f_city"></div>
       <div class="f" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="f"><label for="f_state">State</label><input id="f_state" maxlength="20"></div><div class="f"><label for="f_zip">Zip</label><input id="f_zip" inputmode="numeric" maxlength="10"></div></div>
+      <div class="f full extras" id="xAddrs"></div>
+      <div class="f full"><button class="textbtn addx" type="button" id="addAddr">+ Add another address</button></div>
       <div class="f"><label for="f_category">Account type</label><select id="f_category"></select></div>
       <div class="f"><label for="f_branch">Branch</label><select id="f_branch"></select></div>
       <div class="f" id="repField" hidden><label for="f_rep">Sales rep</label><select id="f_rep"></select></div>
@@ -242,6 +246,13 @@
     <div id="dAcctWrap" hidden style="display:grid;gap:8px">
       <div style="font:600 11px var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Account from call log</div>
       <dl class="info" id="dAcct"></dl>
+    </div>
+    <div id="dCoWrap" style="display:grid;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <div style="font:600 11px var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)" id="dCoLbl">Others at this company</div>
+        <button class="textbtn" type="button" id="dAddCo">+ Add contact at this company</button>
+      </div>
+      <ul class="list" id="dCoList"></ul>
     </div>
     <img class="photo" id="dPhoto" alt="Photo of the business card" hidden>
   </div>

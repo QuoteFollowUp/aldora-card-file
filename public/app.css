@@ -159,3 +159,17 @@ body{margin:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-a
 #filters,header .wrap{min-width:0}
 #filters>*,header .wrap>*{min-width:0}
 #filters{grid-template-columns:minmax(0,1fr)}
+
+.row .co2{font-size:13px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .ph{font:400 12px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.extras{display:grid;gap:10px}
+.extras:empty{display:none}
+.xrow{display:grid;gap:8px;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) auto;align-items:end;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px}
+.xrow.adr{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto}
+.xrow.adr .full2{grid-column:1/-1}
+.xrow input{width:100%;min-width:0;border:1px solid var(--line);background:var(--bg);border-radius:6px;padding:8px 9px}
+.xrow .x{background:none;border:0;color:var(--danger);font-weight:600;font-size:13px;padding:8px 4px}
+.addx{justify-self:start}
+dl.info dd a{color:var(--accent);text-decoration:none}
+.ident .person{font-weight:600;font-size:17px}
+#edit{z-index:25}
