@@ -374,9 +374,9 @@ $("pBody").addEventListener("click", async (e) => {
   try {
     const j = await api(`users/${encodeURIComponent(slug)}/${act}`, { method: "POST", body: {} });
     if (j.code) {
-      const msg = `Aldora Card File\nOpen: ${location.origin}\nYour access code: ${j.code}\nOn your phone, open the link in Safari or Chrome, tap Share > Add to Home Screen, then sign in with the code.`;
+      const msg = `${u.name.split(" ")[0]}, here is your access to the Aldora Card File. It holds your customer contacts. Scan business cards with it, and update people, phones and addresses as they change.\n\nOpen this link on your phone: ${location.origin}\nYour access code: ${j.code}\n\nAdd it to your home screen. On iPhone, tap Share in Safari, then Add to Home Screen. On Android, tap the Chrome menu, then Add to Home screen. Keep the code to yourself. It opens your list only.`;
       $("codeOut").hidden = false;
-      $("codeOut").innerHTML = `<div style="display:grid;gap:8px"><div>New code for <strong>${esc(u.name)}</strong>. Send it now. It won't be shown again.</div><div class="codebox">${esc(j.code)}</div><div class="actions"><button class="btn sm primary" type="button" id="copyCodeMsg" style="flex:none">Copy message for ${esc(u.name.split(" ")[0])}</button></div></div>`;
+      $("codeOut").innerHTML = `<div style="display:grid;gap:8px"><div>New code for <strong>${esc(u.name)}</strong>. Send it now. It won't be shown again.</div><div class="codebox">${esc(j.code)}</div><div class="actions"><button class="btn sm primary" type="button" id="copyCodeMsg" style="flex:none">Copy message</button><a class="btn sm" href="mailto:?subject=${encodeURIComponent("Your Aldora Card File access")}&body=${encodeURIComponent(msg)}">Email it</a><a class="btn sm" href="sms:?&body=${encodeURIComponent(msg)}">Text it</a></div></div>`;
       $("copyCodeMsg").onclick = () => copy(msg, "Message");
     } else toast(`${u.name} can no longer sign in`);
     loadPeople();
