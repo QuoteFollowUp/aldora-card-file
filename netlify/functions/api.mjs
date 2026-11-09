@@ -11,9 +11,14 @@
 //   admin  (MANAGER_CODE)  everything
 //   branch (branch mgr)    contacts whose branch matches theirs, read and edit
 //   rep                    their own shard only
+//   Shared Call Log codes (REP_ACCESS_CODES, team-level Netlify variable) also sign in:
+//     rep -> their Card File record; branch manager -> their branch; ownership / Fred -> every
+//     contact, edit like a branch manager (no import, codes or delete); view-only -> read only.
+//   A person turned off in Reps & codes stays out even with their Call Log code.
 
 import { getStore } from "@netlify/blobs";
 import crypto from "node:crypto";
+import { whoIs as sharedWho, listIsSet, codeMap, canonBranch, REP_BRANCH } from "../lib/access.mjs";
 
 export const config = { path: "/api/*" };
 
@@ -58,6 +63,40 @@ function verify(token) {
   try { const p = JSON.parse(Buffer.from(body, "base64url").toString()); return p.exp > now() ? p : null; } catch { return null; }
 }
 const codeHash = (code) => crypto.createHmac("sha256", secret()).update(String(code).toUpperCase().replace(/[^A-Z0-9]/g, "")).digest("hex");
+// ---------- shared Call Log codes ----------
+const looseKey = (s) => String(canonRep(s) || "").toLowerCase().replace(/[^a-z]/g, "").replace(/(.)\1+/g, "$1");
+const isOff = (u) => !!u && (u.off || (u.codeHash && !u.active));
+const sharedHash = (code) => crypto.createHmac("sha256", secret()).update("shared:" + String(code).toUpperCase().replace(/[^A-Z0-9]/g, "")).digest("hex");
+// A shared sign-in stays valid only while that code is still on the shared list for the same person.
+function sharedStillValid(t) {
+  for (const k of Object.keys(codeMap())) if (sharedHash(k) === t.ch) { const w = sharedWho(k); return !!w && w.name === t.sn; }
+  return false;
+}
+async function sharedLogin(code) {
+  if (!listIsSet()) return null;
+  const s = sharedWho(code);
+  if (!s || s.role === "team") return null;
+  const base = { shared: true, ch: sharedHash(code), sn: s.name, name: s.name, exp: now() + TOKEN_DAYS * 864e5 };
+  if (s.role === "all") {
+    const user = { role: "branch", name: s.name, slug: "all-" + slugify(s.name), branch: "*", ro: !!s.readOnly };
+    return { token: sign({ ...base, ...user }), user };
+  }
+  let slug, out;
+  await mutate("users", { users: {} }, (d) => {
+    const want = s.role === "rep" ? "rep" : "branch";
+    const hit = Object.entries(d.users).find(([, u]) => u.role === want && looseKey(u.name) === looseKey(s.name) && (want === "rep" || canonBranch(u.branch) === s.branch));
+    if (hit) { [slug] = hit; if (isOff(hit[1])) { out = "off"; return; } }
+    else {
+      slug = want === "rep" ? slugify(canonRep(s.name)) : "bm-" + slugify(s.name);
+      d.users[slug] = { name: canonRep(s.name), role: want, branch: want === "rep" ? (REP_BRANCH[s.rep] || "") : s.branch, active: false, ver: 0, created: now() };
+    }
+    const u = d.users[slug];
+    out = { role: u.role, name: u.name, slug, branch: u.branch || "" };
+  });
+  if (!out || out === "off") return out || null;
+  return { token: sign({ ...base, ...out }), user: out };
+}
+
 function newCode() {
   const A = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; let s = "";
   for (const b of crypto.randomBytes(8)) s += A[b % A.length];
@@ -100,6 +139,14 @@ async function auth(req) {
   const t = verify((req.headers.get("authorization") || "").replace(/^Bearer\s+/i, ""));
   if (!t) return null;
   if (t.role === "admin") return t;
+  if (t.shared) {
+    if (!sharedStillValid(t)) return null;
+    if (t.branch === "*") return t;
+    const { users } = await getUsers();
+    const u = users[t.slug];
+    if (!u || isOff(u)) return null;
+    return { ...t, name: u.name, branch: u.branch || t.branch || "", role: u.role };
+  }
   const { users } = await getUsers();
   const u = users[t.slug];
   if (!u || !u.active || u.ver !== t.ver) return null;
@@ -108,7 +155,7 @@ async function auth(req) {
 function canSee(user, shard, contact) {
   if (user.role === "admin") return true;
   if (user.role === "rep") return shard === user.slug;
-  if (user.role === "branch") return !!contact && contact.branch === user.branch;
+  if (user.role === "branch") return user.branch === "*" || (!!contact && (contact.branch === user.branch || canonBranch(contact.branch) === canonBranch(user.branch)));
   return false;
 }
 
@@ -167,14 +214,19 @@ export default async (req) => {
       const code = String(body.code || "").trim();
       if (!code) return err(400, "Enter your access code.");
       const mgr = process.env.MANAGER_CODE;
-      if (mgr && code === mgr) {
+      if (mgr && code.toUpperCase().replace(/[^A-Z0-9]/g, "") === mgr.toUpperCase().replace(/[^A-Z0-9]/g, "")) {
         const user = { role: "admin", name: "Manager", slug: "admin", branch: "" };
         return json(200, { token: sign({ ...user, exp: now() + TOKEN_DAYS * 864e5 }), user });
       }
       const h = codeHash(code);
       const { users } = await getUsers();
       const hit = Object.entries(users).find(([, u]) => u.active && u.codeHash === h);
-      if (!hit) { await new Promise((r) => setTimeout(r, 700)); return err(401, "That code didn't work. Check it with your manager."); }
+      if (!hit) {
+        const sh = await sharedLogin(code);
+        if (sh === "off") return err(401, "Your Card File access is turned off. Check with your manager.");
+        if (sh) return json(200, sh);
+        await new Promise((r) => setTimeout(r, 700)); return err(401, "That code didn't work. Check it with your manager.");
+      }
       const [slug, u] = hit;
       const user = { role: u.role, name: u.name, slug, branch: u.branch || "" };
       return json(200, { token: sign({ ...user, ver: u.ver, exp: now() + TOKEN_DAYS * 864e5 }), user });
@@ -183,6 +235,7 @@ export default async (req) => {
     const user = await auth(req);
     if (!user) return err(401, "Your session ended. Sign in again.");
     const isAdmin = user.role === "admin";
+    if (user.ro && method !== "GET") return err(403, "This code can view contacts but not change them.");
 
     // ---- me ----
     if (parts[0] === "me") return json(200, { user: { role: user.role, name: user.name, slug: user.slug, branch: user.branch || "" } });
@@ -207,7 +260,7 @@ export default async (req) => {
       else {
         rep = canonRep(body.contact?.rep); shard = rep ? slugify(rep) : UNASSIGNED;
         branch = String(body.contact?.branch || "");
-        if (user.role === "branch") branch = user.branch;
+        if (user.role === "branch" && user.branch !== "*") branch = user.branch;
       }
       const id = "c-" + rid(6);
       const hasPhoto = await savePhoto(shard, id, body.contact?.photo);
@@ -321,7 +374,7 @@ Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       const { blobs } = await store().list({ prefix: "log/" });
       const keys = blobs.map((b) => b.key).filter((k) => k.slice(4, 18) >= since).sort().reverse().slice(0, 1500);
       const entries = (await Promise.all(keys.map((k) => getJSON(k, null)))).filter(Boolean);
-      return json(200, { changes: user.role === "branch" ? entries.filter((e) => e.branch === user.branch) : entries });
+      return json(200, { changes: user.role === "branch" && user.branch !== "*" ? entries.filter((e) => e.branch === user.branch || canonBranch(e.branch) === canonBranch(user.branch)) : entries });
     }
 
     // ---------- admin only below ----------
@@ -346,8 +399,8 @@ Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       let code = null;
       await mutate("users", { users: {} }, (d) => {
         const u = d.users[slug]; if (!u) throw Object.assign(new Error("Person not found."), { status: 404 });
-        if (act === "code") { code = newCode(); u.codeHash = codeHash(code); u.ver = (u.ver || 0) + 1; u.active = true; }
-        else if (act === "deactivate") { u.active = false; u.ver = (u.ver || 0) + 1; }
+        if (act === "code") { code = newCode(); u.codeHash = codeHash(code); u.ver = (u.ver || 0) + 1; u.active = true; u.off = false; }
+        else if (act === "deactivate") { u.active = false; u.off = true; u.ver = (u.ver || 0) + 1; }
         else if (act === "branch") { u.branch = String(body.branch || ""); }
         else throw Object.assign(new Error("Unknown action."), { status: 400 });
       });
