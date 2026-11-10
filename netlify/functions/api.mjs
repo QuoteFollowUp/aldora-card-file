@@ -377,6 +377,27 @@ Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       return json(200, { changes: user.role === "branch" && user.branch !== "*" ? entries.filter((e) => e.branch === user.branch || canonBranch(e.branch) === canonBranch(user.branch)) : entries });
     }
 
+    // ---- personal groups (every signed-in person keeps their own) ----
+    // groups/<slug>: {myEmail, groups: {id: {name, members: [contactId], created, updated}}}
+    // Groups hold contact ids only. Contact details still come from /contacts, so a group
+    // can never show someone a contact they aren't allowed to see.
+    if (parts[0] === "groups") {
+      const key = "groups/" + slugify(user.slug || user.name);
+      if (method === "GET") return json(200, await getJSON(key, { myEmail: "", groups: {} }));
+      if (method === "PUT") {
+        const t = (x, n) => String(x ?? "").trim().slice(0, n);
+        const out = { myEmail: t(body.myEmail, 200), groups: {} };
+        for (const [id, g] of Object.entries(body.groups || {}).slice(0, 200)) {
+          if (!/^[a-z0-9-]{1,40}$/i.test(id) || !g) continue;
+          const name = t(g.name, 60); if (!name) continue;
+          out.groups[id] = { name, members: [...new Set((Array.isArray(g.members) ? g.members : []).map((m) => t(m, 60)).filter(Boolean))].slice(0, 5000), created: +g.created || now(), updated: now() };
+        }
+        await store().setJSON(key, out);
+        return json(200, out);
+      }
+      return err(405, "Not allowed.");
+    }
+
     // ---------- admin only below ----------
     if (!isAdmin) return err(403, "Manager access only.");
 

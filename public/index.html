@@ -24,7 +24,7 @@
   <form class="box" id="loginForm">
     <h1>Card File</h1>
     <p>Aldora Aluminum &amp; Glass Products. Enter the access code your manager gave you.</p>
-    <label class="sr" for="code">Access code</label>
+    <label class="sr" for="code">Access code (your Call Log code works too)</label>
     <input id="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" required>
     <button class="btn primary" type="submit" id="loginBtn">Sign in</button>
     <div class="err" id="loginErr" role="alert"></div>
@@ -38,7 +38,8 @@
     <div class="who-line"><span id="whoami"></span><button type="button" id="signout">Sign out</button></div>
     <div class="tabs" id="tabs" role="tablist" hidden>
       <button type="button" role="tab" data-tab="contacts" aria-selected="true">Contacts</button>
-      <button type="button" role="tab" data-tab="changes" aria-selected="false">Changes</button>
+      <button type="button" role="tab" data-tab="groups" aria-selected="false">My groups</button>
+      <button type="button" role="tab" data-tab="changes" aria-selected="false" data-mgr>Changes</button>
       <button type="button" role="tab" data-tab="people" aria-selected="false" data-admin>Reps &amp; codes</button>
       <button type="button" role="tab" data-tab="import" aria-selected="false" data-admin>Import</button>
     </div>
@@ -88,7 +89,8 @@
     <div class="groupbar" id="groupbar" hidden>
       <span class="lbl" id="grouplbl"></span>
       <span style="display:flex;gap:14px">
-        <button class="textbtn" id="emailGroup" type="button">Email this group</button>
+        <button class="textbtn" id="selectBtn" type="button">Select</button>
+        <button class="textbtn" id="emailGroup" type="button">Email these</button>
         <button class="textbtn" id="exportBtn" type="button">Export</button>
       </span>
     </div>
@@ -97,6 +99,7 @@
       <label class="sr" for="groupaddrs">Email addresses</label>
       <textarea id="groupaddrs" readonly></textarea>
       <div class="actions" id="groupBatches"></div>
+      <div class="actions"><button class="btn sm" id="saveViewGroup" type="button">Save these as a group</button></div>
       <div class="actions"><button class="btn sm" id="closeGroup" type="button">Close</button></div>
     </div>
     <ul class="list" id="list"></ul>
@@ -105,6 +108,22 @@
       <div class="cardart" aria-hidden="true"><i></i><i></i><i></i></div>
       <h2 id="emptyTitle">No contacts yet</h2>
       <p id="emptyText">Tap Scan card and take a photo of a customer's business card.</p>
+    </div>
+  </div>
+
+  <!-- Groups -->
+  <div class="wrap panel" id="tab-groups" hidden>
+    <h2>My groups</h2>
+    <p>Your own email lists, like Lead Time Sheets or Storefront Customers. Only you see your groups. Open a group to email everyone in it from Outlook.</p>
+    <div class="inline">
+      <label for="newGroupName" class="sr">New group name</label>
+      <input id="newGroupName" placeholder="New group name, e.g. Lead Time Sheets" style="flex:1;min-width:0">
+      <button class="btn sm primary" id="newGroupBtn" type="button" style="flex:none">Create group</button>
+    </div>
+    <ul class="list" id="groupList"></ul>
+    <div class="empty" id="groupEmpty" hidden>
+      <h2>No groups yet</h2>
+      <p>Create a group above, then add people from Contacts. Tap Select on the contact list to add several at once, or open a contact and tap Add to group.</p>
     </div>
   </div>
 
@@ -170,6 +189,12 @@
     </label>
     <input id="cam" type="file" accept="image/*" capture="environment" class="sr">
     <button class="btn" id="manual" type="button">Add by hand</button>
+  </div>
+  <div class="wrap selbar" id="selbar" hidden>
+    <span id="selCount">0 selected</span>
+    <button class="textbtn" id="selAll" type="button">Select all shown</button>
+    <button class="btn primary" id="selAdd" type="button" disabled>Add to group</button>
+    <button class="btn" id="selDone" type="button">Cancel</button>
   </div>
 </div>
 </div>
@@ -242,6 +267,7 @@
         <a class="btn sm" id="draftMail" href="#">Open in Mail</a>
       </div>
     </div>
+    <div class="dgroups" id="dGroups"></div>
     <dl class="info" id="dInfo"></dl>
     <div id="dAcctWrap" hidden style="display:grid;gap:8px">
       <div style="font:600 11px var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Account from call log</div>
@@ -255,6 +281,41 @@
       <ul class="list" id="dCoList"></ul>
     </div>
     <img class="photo" id="dPhoto" alt="Photo of the business card" hidden>
+  </div>
+</section>
+
+<!-- Group picker -->
+<section class="sheet" id="gpick" hidden aria-labelledby="gpickTitle">
+  <div class="wrap">
+    <div class="sheethead"><h2 id="gpickTitle">Add to group</h2><button class="btn sm" id="gpickCancel" type="button">Cancel</button></div>
+    <p id="gpickNote" style="margin:0;color:var(--muted)"></p>
+    <ul class="list" id="gpickList"></ul>
+    <div class="drop">
+      <label for="gpickNew"><strong>Or start a new group</strong></label>
+      <div class="inline"><input id="gpickNew" placeholder="Group name" style="flex:1;min-width:0"><button class="btn sm primary" id="gpickCreate" type="button" style="flex:none">Create and add</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- Group view -->
+<section class="sheet" id="gview" hidden aria-labelledby="gvName">
+  <div class="wrap">
+    <div class="sheethead"><button class="btn sm" id="gvBack" type="button">Back</button><span style="display:flex;gap:8px"><button class="btn sm" id="gvAdd" type="button">Add people</button><button class="btn sm danger" id="gvDel" type="button">Delete group</button></span></div>
+    <div class="confirm" id="gvDelConfirm" hidden>
+      <div>Delete this group? The contacts stay in your file.</div>
+      <div class="actions"><button class="btn sm danger" id="gvDelYes" type="button">Delete group</button><button class="btn sm" id="gvDelNo" type="button">Keep it</button></div>
+    </div>
+    <div class="ident"><h3 id="gvName"></h3><div class="t" id="gvCount"></div></div>
+    <div class="draft" id="gvSend">
+      <div class="subj">Email this group</div>
+      <div style="font-size:14px;color:var(--muted)">Everyone goes in BCC so customers never see each other. Your own address goes in To.</div>
+      <div class="f"><label for="myEmail">Your email (To line)</label><input id="myEmail" type="email" inputmode="email" placeholder="you@aldoraglass.com" style="width:100%;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:10px 11px"></div>
+      <div class="f"><label for="gvSubject">Subject</label><input id="gvSubject" style="width:100%;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:10px 11px"></div>
+      <div class="actions" id="gvMail"></div>
+      <div style="font-size:13px;color:var(--muted)" id="gvMailNote"></div>
+    </div>
+    <ul class="list" id="gvList"></ul>
+    <div class="f"><label for="gvRename">Rename group</label><div class="inline"><input id="gvRename" style="flex:1;min-width:0"><button class="btn sm" id="gvRenameBtn" type="button" style="flex:none">Save name</button></div></div>
   </div>
 </section>
 

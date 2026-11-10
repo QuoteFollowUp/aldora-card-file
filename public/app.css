@@ -173,3 +173,26 @@ body{margin:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-a
 dl.info dd a{color:var(--accent);text-decoration:none}
 .ident .person{font-weight:600;font-size:17px}
 #edit{z-index:25}
+
+.selbar{padding-block:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.selbar #selCount{font-weight:600;min-width:84px}
+.selbar .btn.primary{flex:1}
+.row.selectable{grid-template-columns:28px 1fr auto}
+.row .tick{width:22px;height:22px;border:2px solid var(--line);border-radius:5px;display:grid;place-items:center;background:var(--bg)}
+.row[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.row[aria-pressed="true"] .tick{background:var(--accent);border-color:var(--accent)}
+.row[aria-pressed="true"] .tick::after{content:"";width:6px;height:11px;border:solid var(--accent-fg);border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px)}
+.dgroups{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.gchip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600}
+.gchip.add{color:var(--accent);border-style:dashed}
+.grow{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;width:100%;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px}
+.grow .gn{font-weight:700;font-size:16px}
+.grow .gc{font-size:13px;color:var(--muted)}
+.mrow{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:4px 4px 4px 0}
+.mrow .row{border:0;background:none}
+.mrow .x{background:none;border:0;color:var(--danger);font-weight:600;font-size:13px;padding:8px 10px}
+.noemail{color:var(--due);font-size:12px;font-weight:600}
+#gpick,#gview{z-index:22}
+.selbar{display:grid;grid-template-columns:1fr auto;gap:8px 10px;align-items:center}
+.selbar #selAll{justify-self:end}
+.selbar .btn.primary{flex:none;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

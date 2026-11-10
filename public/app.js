@@ -49,23 +49,26 @@ $("loginForm").addEventListener("submit", async (e) => {
 
 function start(user) {
   me = user; $("login").hidden = true; $("app").hidden = false;
-  const roleLabel = user.role === "admin" ? "Manager, all branches" : user.role === "branch" ? `Branch manager, ${user.branch}` : `${user.name}${user.branch ? ", " + user.branch : ""}`;
+  const roleLabel = user.role === "admin" ? "Manager, all branches" : user.role === "branch" ? (user.branch === "*" ? `${user.name}, all branches` : `Branch manager, ${user.branch}`) : `${user.name}${user.branch ? ", " + user.branch : ""}`;
   $("whoami").textContent = "Signed in: " + roleLabel;
   const mgr = user.role !== "rep";
-  $("tabs").hidden = !mgr;
+  $("tabs").hidden = false;
+  document.querySelectorAll("[data-mgr]").forEach((b) => (b.hidden = !mgr));
   document.querySelectorAll("[data-admin]").forEach((b) => (b.hidden = user.role !== "admin"));
   $("fRep").hidden = !mgr;
-  $("fBranch").hidden = user.role === "rep" || user.role === "branch";
+  $("fBranch").hidden = user.role === "rep" || (user.role === "branch" && user.branch !== "*");
   $("repField").hidden = user.role !== "admin";
   $("dDel").hidden = user.role !== "admin";
   showTab("contacts");
-  loadContacts();
+  loadContacts(); loadGroups();
 }
 
 /* ---------- tabs ---------- */
 function showTab(t) {
   document.querySelectorAll("#tabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["contacts", "changes", "people", "import"].forEach((x) => ($("tab-" + x).hidden = x !== t));
+  ["contacts", "groups", "changes", "people", "import"].forEach((x) => ($("tab-" + x).hidden = x !== t));
+  if (t !== "contacts") endSelect();
+  if (t === "groups") renderGroups();
   $("filters").hidden = t !== "contacts"; $("bar").hidden = t !== "contacts";
   if (t === "changes") loadChanges(); if (t === "people") loadPeople();
 }
@@ -116,8 +119,8 @@ function renderList() {
   const base = baseFiltered(); renderChips(base);
   const v = visible(base), mgr = me && me.role !== "rep";
   $("count").textContent = loaded ? `${cards.filter((c) => c.status !== "left").length.toLocaleString()} contacts` : "Loading…";
-  $("list").innerHTML = v.slice(0, shown).map((c) => `<li><button class="row${c.status === "left" ? " left" : ""}" type="button" data-id="${esc(c.id)}">
-    <span class="thumb"${c.hasPhoto ? ' style="background:var(--accent-soft)" title="Card photo on file"' : ""}></span>
+  $("list").innerHTML = v.slice(0, shown).map((c) => `<li><button class="row${c.status === "left" ? " left" : ""}${selecting ? " selectable" : ""}" type="button" data-id="${esc(c.id)}"${selecting ? ` aria-pressed="${selected.has(c.id)}"` : ""}>
+    ${selecting ? `<span class="tick" aria-hidden="true"></span>` : `<span class="thumb"${c.hasPhoto ? ' style="background:var(--accent-soft)" title="Card photo on file"' : ""}></span>`}
     <span class="who"><div class="name">${esc(c.company || personName(c) || "Unnamed contact")}</div><div class="co2">${esc(c.company ? [personName(c) || "No contact name", c.title].filter(Boolean).join(" · ") : c.title || "")}</div><div class="ph">${esc([primaryPhone(c), mgr ? c.rep : ""].filter(Boolean).join(" · "))}</div></span>
     <span class="meta">${c.status === "left" ? `<span class="tag gone">Left</span>` : isDue(c) ? `<span class="tag due">Follow up</span>` : `<span class="tag">${esc(c.category || "Unassigned")}</span>`}${c.branch || c.city ? `<span class="loc">${esc(mgr ? c.branch : [c.city, c.state].filter(Boolean).join(", ") || c.branch)}</span>` : ""}</span>
   </button></li>`).join("");
@@ -132,7 +135,12 @@ function reset() { shown = PAGE; $("grouppanel").hidden = true; renderList(); }
 $("chips").addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (!b) return; filter = b.dataset.f; reset(); });
 ["q", "sort", "fBranch", "fRep", "fProd"].forEach((id) => $(id).addEventListener(id === "q" ? "input" : "change", reset));
 $("more").onclick = () => { shown += PAGE; renderList(); };
-$("list").addEventListener("click", (e) => { const b = e.target.closest(".row"); if (b) openDetail(b.dataset.id); });
+$("list").addEventListener("click", (e) => {
+  const b = e.target.closest(".row"); if (!b) return;
+  if (!selecting) return openDetail(b.dataset.id);
+  const id = b.dataset.id; selected.has(id) ? selected.delete(id) : selected.add(id);
+  b.setAttribute("aria-pressed", String(selected.has(id))); updateSelbar();
+});
 function upsertLocal(c) { const i = cards.findIndex((x) => x.id === c.id); if (i >= 0) cards[i] = c; else cards.push(c); renderList(); }
 
 /* ---------- group email + export ---------- */
@@ -148,6 +156,7 @@ $("emailGroup").onclick = () => {
   $("grouppanel").hidden = false;
 };
 $("groupBatches").addEventListener("click", (e) => { const b = e.target.closest("[data-b]"); if (!b) return; const i = +b.dataset.b; copy(groupAddrs.slice(i * BATCH, (i + 1) * BATCH).join("; "), `Batch ${i + 1}`); });
+$("saveViewGroup").onclick = () => openPicker(visible().filter((c) => c.status !== "left").map((c) => c.id), `the ${visible().filter((c) => c.status !== "left").length.toLocaleString()} contacts in this view`);
 $("closeGroup").onclick = () => ($("grouppanel").hidden = true);
 $("exportBtn").onclick = () => {
   const head = ["First","Last","Title","Company","Email","Mobile","Office","Other phones","Website","Address","City","State","Zip","Other addresses","Account type","Branch","Sales rep","Status","Replaced by","Products","Storefront status","Last call","Calls logged","Open quotes","Open quote $","Storefront quote $","Where met","Follow up","Notes"];
@@ -220,9 +229,12 @@ function openEdit(c, preset) {
   $("f_branch").disabled = me.role === "branch";
   $("editPhoto").hidden = true; $("readStatus").hidden = true; $("saveBtn").disabled = false;
   if (c && c.hasPhoto) loadPhoto(c, $("editPhoto"));
-  $("edit").hidden = false; $("edit").scrollTop = 0; document.body.style.overflow = "hidden";
+  raise($("edit"));
 }
-function closeSheets() { $("edit").hidden = true; $("detail").hidden = true; document.body.style.overflow = ""; }
+let zTop = 30;
+function raise(el) { el.style.zIndex = ++zTop; el.hidden = false; el.scrollTop = 0; document.body.style.overflow = "hidden"; }
+function closeSheet(id) { $(id).hidden = true; if (["edit", "detail", "gpick", "gview"].every((x) => $(x).hidden)) document.body.style.overflow = ""; }
+function closeSheets() { ["edit", "detail", "gpick", "gview"].forEach((x) => ($(x).hidden = true)); document.body.style.overflow = ""; }
 $("editCancel").onclick = () => { readJob++; if (!$("detail").hidden) $("edit").hidden = true; else closeSheets(); };
 $("manual").onclick = () => openEdit(null);
 $("form").addEventListener("submit", async (e) => {
@@ -257,7 +269,7 @@ async function loadPhoto(c, imgEl) {
 }
 function infoRows(el, lines, copyable) {
   const canCopy = (l) => copyable ? copyable.includes(l[0]) : l[3] === "tel" || l[0] === "Email" || /\n|\d{5}/.test(l[1]) && !/^(Met|Notes|Replaced by)$/.test(l[0]);
-  el.innerHTML = lines.map((l, i) => `<div class="ln"><dt>${esc(l[0])}</dt><dd class="${l[2] ? "num" : ""}" style="white-space:pre-line">${l[3] === "tel" ? `<a href="tel:${esc(digits(String(l[1]).split(" x")[0]))}">${esc(l[1])}</a>` : esc(l[1])}</dd>${canCopy(l) ? `<button class="copy" type="button" data-i="${i}">Copy</button>` : "<span></span>"}</div>`).join("");
+  el.innerHTML = lines.map((l, i) => `<div class="ln"><dt>${esc(l[0])}</dt><dd class="${l[2] ? "num" : ""}" style="white-space:pre-line">${l[3] === "tel" ? `<a href="tel:${esc(digits(String(l[1]).split(" x")[0]))}">${esc(l[1])}</a>` : l[3] === "mail" ? `<a href="mailto:${esc(l[1])}">${esc(l[1])}</a>` : esc(l[1])}</dd>${canCopy(l) ? `<button class="copy" type="button" data-i="${i}">Copy</button>` : "<span></span>"}</div>`).join("");
   el.onclick = (e) => { const b = e.target.closest(".copy"); if (b) { const l = lines[+b.dataset.i]; copy(l[1], l[0]); } };
 }
 function openDetail(id) {
@@ -270,7 +282,7 @@ function openDetail(id) {
   const phone = c.mobile || c.office || ((c.phones || [])[0] || {}).number;
   $("qEmail").href = c.email ? "mailto:" + encodeURIComponent(c.email) : "#"; $("qEmail").style.opacity = c.email ? 1 : 0.4;
   $("qCall").href = phone ? "tel:" + digits(phone.split(" x")[0]) : "#"; $("qCall").style.opacity = phone ? 1 : 0.4;
-  const lines = [["Email", c.email, 0], ["Mobile", c.mobile, 1, "tel"], ["Office", c.office, 1, "tel"]];
+  const lines = [["Email", c.email, 0, "mail"], ["Mobile", c.mobile, 1, "tel"], ["Office", c.office, 1, "tel"]];
   (c.phones || []).forEach((p) => lines.push([p.label || "Phone", p.number, 1, "tel"]));
   lines.push(["Website", c.website, 0], ["Address", oneAddr(c), 0]);
   (c.addresses || []).forEach((a) => lines.push([a.label || "Address", oneAddr(a), 0]));
@@ -285,11 +297,12 @@ function openDetail(id) {
   $("dPhoto").hidden = true; if (c.hasPhoto) loadPhoto(c, $("dPhoto"));
   $("dLeft").textContent = c.status === "left" ? "Undo left" : "Left company";
   $("draft").hidden = true; $("delConfirm").hidden = true; $("leftBox").hidden = true;
-  $("detail").hidden = false; $("detail").scrollTop = 0; document.body.style.overflow = "hidden";
+  renderDetailGroups(c);
+  raise($("detail"));
 }
 $("qEmail").addEventListener("click", (e) => { if (!current || !current.email) { e.preventDefault(); toast("No email on this contact."); } });
 $("qCall").addEventListener("click", (e) => { if (!current || !(current.mobile || current.office)) { e.preventDefault(); toast("No phone on this contact."); } });
-$("dBack").onclick = closeSheets;
+$("dBack").onclick = () => { closeSheet("detail"); if (!$("gview").hidden) renderGroupView(); };
 $("dCoList").addEventListener("click", (e) => { const b = e.target.closest(".row"); if (b) openDetail(b.dataset.id); });
 $("dAddCo").onclick = () => {
   const c = current;
@@ -507,8 +520,118 @@ $("adrGo").onclick = async () => {
   finally { $("adrGo").disabled = false; }
 };
 
+/* ---------- my groups ---------- */
+let addTarget = null, gdoc = { myEmail: "", groups: {} }, gLoaded = false, selecting = false, selected = new Set(), pickIds = [], openGroupId = null;
+const MAIL_MAX = 1800; // Outlook on Windows drops mailto links much past 2,000 characters
+async function loadGroups() { try { gdoc = await api("groups"); gdoc.groups = gdoc.groups || {}; gLoaded = true; renderGroups(); } catch {} }
+async function saveGroups(msg) {
+  try { gdoc = await api("groups", { method: "PUT", body: gdoc }); if (msg) toast(msg); }
+  catch (err) { toast(err.message); loadGroups(); }
+  renderGroups(); if (current && !$("detail").hidden) renderDetailGroups(current);
+}
+const gList = () => Object.entries(gdoc.groups || {}).map(([id, g]) => ({ id, ...g })).sort((a, b) => a.name.localeCompare(b.name));
+const byId = (id) => cards.find((c) => c.id === id);
+function groupMembers(g) { return (g.members || []).map(byId).filter(Boolean); }
+function newGroup(name) {
+  name = String(name || "").trim(); if (!name) { toast("Name the group first."); return null; }
+  const hit = gList().find((g) => g.name.toLowerCase() === name.toLowerCase()); if (hit) return hit.id;
+  const id = "g-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  gdoc.groups[id] = { name, members: [], created: Date.now() }; return id;
+}
+function renderGroups() {
+  const gs = gList();
+  $("groupEmpty").hidden = gs.length > 0;
+  $("groupList").innerHTML = gs.map((g) => { const m = groupMembers(g), em = m.filter((c) => c.email && c.status !== "left").length; return `<li><button class="grow" type="button" data-g="${esc(g.id)}"><span><div class="gn">${esc(g.name)}</div><div class="gc">${m.length} contact${m.length === 1 ? "" : "s"} · ${em} with email</div></span><span class="tag">Open</span></button></li>`; }).join("");
+}
+$("groupList").addEventListener("click", (e) => { const b = e.target.closest("[data-g]"); if (b) openGroup(b.dataset.g); });
+$("newGroupBtn").onclick = async () => { const id = newGroup($("newGroupName").value); if (!id) return; $("newGroupName").value = ""; await saveGroups("Group created. Add people from Contacts."); openGroup(id); };
+
+// select mode on the contact list
+function updateSelbar() { $("selCount").textContent = `${selected.size} selected`; $("selAdd").disabled = !selected.size; }
+function startSelect() { selecting = true; selected.clear(); $("bar").querySelector(".wrap").hidden = true; $("selbar").hidden = false; $("selectBtn").textContent = "Done"; updateSelbar(); renderList(); }
+function endSelect() { addTarget = null; $("selAdd").textContent = "Add to group"; if (!selecting) return; selecting = false; selected.clear(); $("bar").querySelector(".wrap").hidden = false; $("selbar").hidden = true; $("selectBtn").textContent = "Select"; renderList(); }
+$("selectBtn").onclick = () => (selecting ? endSelect() : startSelect());
+$("selDone").onclick = endSelect;
+$("selAll").onclick = () => { visible().filter((c) => c.status !== "left").forEach((c) => selected.add(c.id)); updateSelbar(); renderList(); };
+$("selAdd").onclick = () => { if (addTarget && gdoc.groups[addTarget]) { const g = addTarget; pickIds = [...selected]; addTo(g).then(() => openGroup(g)); } else openPicker([...selected], `${selected.size} contact${selected.size === 1 ? "" : "s"}`); };
+
+// group picker
+function openPicker(ids, label) {
+  pickIds = ids; if (!ids.length) { toast("Nothing to add."); return; }
+  $("gpickNote").textContent = `Adding ${label}. Pick a group.`;
+  const gs = gList();
+  $("gpickList").innerHTML = gs.length ? gs.map((g) => { const have = ids.filter((id) => (g.members || []).includes(id)).length; return `<li><button class="grow" type="button" data-g="${esc(g.id)}"><span><div class="gn">${esc(g.name)}</div><div class="gc">${(g.members || []).length} contacts${have ? ` · ${have === ids.length ? "already in" : have + " already in"}` : ""}</div></span><span class="tag">Add</span></button></li>`; }).join("") : `<li style="color:var(--muted);font-size:14px">No groups yet. Name your first one below.</li>`;
+  $("gpickNew").value = ""; raise($("gpick"));
+}
+async function addTo(id) {
+  const g = gdoc.groups[id]; const before = g.members.length;
+  g.members = [...new Set([...g.members, ...pickIds])];
+  closeSheet("gpick"); endSelect();
+  await saveGroups(`${g.members.length - before} added to ${g.name}`);
+  if (!$("gview").hidden) renderGroupView();
+}
+$("gpickList").addEventListener("click", (e) => { const b = e.target.closest("[data-g]"); if (b) addTo(b.dataset.g); });
+$("gpickCreate").onclick = () => { const id = newGroup($("gpickNew").value); if (id) addTo(id); };
+$("gpickCancel").onclick = () => closeSheet("gpick");
+
+// groups on a contact's page
+function renderDetailGroups(c) {
+  const ins = gList().filter((g) => (g.members || []).includes(c.id));
+  $("dGroups").innerHTML = ins.map((g) => `<button class="gchip" type="button" data-g="${esc(g.id)}">${esc(g.name)}</button>`).join("") + `<button class="gchip add" type="button" id="dAddGroup">+ Add to group</button>`;
+}
+$("dGroups").addEventListener("click", (e) => {
+  if (e.target.closest("#dAddGroup")) return openPicker([current.id], fullName(current));
+  const b = e.target.closest("[data-g]"); if (b) { closeSheet("detail"); openGroup(b.dataset.g); }
+});
+
+// one group
+function openGroup(id) { openGroupId = id; $("gvDelConfirm").hidden = true; $("myEmail").value = gdoc.myEmail || ""; $("gvSubject").value = gdoc.groups[id].name; renderGroupView(); raise($("gview")); }
+function groupBatches(to, addrs, subject) {
+  const base = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&bcc=`;
+  const out = []; let cur = [];
+  for (const a of addrs) { const next = [...cur, a]; if (cur.length && (base + next.map(encodeURIComponent).join(",")).length > MAIL_MAX) { out.push(cur); cur = [a]; } else cur = next; }
+  if (cur.length) out.push(cur);
+  return out.map((b) => ({ list: b, href: base + b.map(encodeURIComponent).join(",") }));
+}
+let gvAddrs = [];
+function renderGroupView() {
+  const g = gdoc.groups[openGroupId]; if (!g) return closeSheet("gview");
+  const m = groupMembers(g).sort((a, b) => (a.company || "").localeCompare(b.company || "") || personName(a).localeCompare(personName(b)));
+  const missing = (g.members || []).length - m.length;
+  const seen = new Set(); gvAddrs = [];
+  m.forEach((c) => { const e = (c.email || "").trim(); if (e && c.status !== "left" && !seen.has(e.toLowerCase())) { seen.add(e.toLowerCase()); gvAddrs.push(e); } });
+  $("gvName").textContent = g.name; $("gvRename").value = g.name;
+  $("gvCount").textContent = `${m.length} contact${m.length === 1 ? "" : "s"} · ${gvAddrs.length} email address${gvAddrs.length === 1 ? "" : "es"}${missing ? ` · ${missing} no longer in your list` : ""}`;
+  const to = $("myEmail").value.trim(), subj = $("gvSubject").value.trim() || g.name;
+  const batches = gvAddrs.length ? groupBatches(to, gvAddrs, subj) : [];
+  $("gvMail").innerHTML = !gvAddrs.length ? "" : batches.map((b, i) => `<a class="btn sm${i === 0 ? " primary" : ""}" href="${esc(b.href)}" style="flex:none">${batches.length > 1 ? `Open email ${i + 1} of ${batches.length} (${b.list.length})` : `Open in Outlook (${b.list.length} in BCC)`}</a>`).join("") + `<button class="btn sm" type="button" id="gvCopy">Copy BCC list</button>`;
+  $("gvMailNote").textContent = !gvAddrs.length ? "Nobody in this group has an email address yet." : (batches.length > 1 ? `Outlook can't take this many addresses in one link, so it opens ${batches.length} emails. Send the same attachment on each, or use Copy BCC list and paste into one email's BCC line. ` : "") + (to ? "" : "Add your email above so it fills the To line.");
+  $("gvList").innerHTML = m.map((c) => `<li class="mrow"><button class="row${c.status === "left" ? " left" : ""}" type="button" data-id="${esc(c.id)}" style="grid-template-columns:1fr"><span class="who"><div class="name">${esc(c.company || personName(c))}</div><div class="co2">${esc(c.company ? personName(c) || "No contact name" : c.title || "")}</div><div class="ph">${c.email ? esc(c.email) : `<span class="noemail">No email</span>`}${c.status === "left" ? ` · <span class="noemail">Left company</span>` : ""}</div></span></button><button class="x" type="button" data-rm="${esc(c.id)}">Remove</button></li>`).join("") || `<li style="color:var(--muted);font-size:14px">No one in this group yet. Tap Add people.</li>`;
+}
+$("gvMail").addEventListener("click", (e) => { if (e.target.closest("#gvCopy")) copy(gvAddrs.join("; "), "BCC list"); });
+$("gvList").addEventListener("click", async (e) => {
+  const rm = e.target.closest("[data-rm]");
+  if (rm) { const g = gdoc.groups[openGroupId]; g.members = g.members.filter((x) => x !== rm.dataset.rm); renderGroupView(); await saveGroups("Removed from group"); return; }
+  const b = e.target.closest(".row"); if (b) openDetail(b.dataset.id);
+});
+$("myEmail").addEventListener("change", () => { gdoc.myEmail = $("myEmail").value.trim(); renderGroupView(); saveGroups(); });
+$("myEmail").addEventListener("input", renderGroupView);
+$("gvSubject").addEventListener("input", renderGroupView);
+$("gvBack").onclick = () => { closeSheet("gview"); renderGroups(); };
+$("gvAdd").onclick = () => { const id = openGroupId; closeSheets(); showTab("contacts"); startSelect(); addTarget = id; $("selAdd").textContent = `Add to ${gdoc.groups[id].name}`; toast("Search or filter, tap people, then tap Add."); };
+$("gvRenameBtn").onclick = () => { const n = $("gvRename").value.trim(); if (!n) return; gdoc.groups[openGroupId].name = n; renderGroupView(); saveGroups("Group renamed"); };
+$("gvDel").onclick = () => ($("gvDelConfirm").hidden = false);
+$("gvDelNo").onclick = () => ($("gvDelConfirm").hidden = true);
+$("gvDelYes").onclick = async () => { const n = gdoc.groups[openGroupId].name; delete gdoc.groups[openGroupId]; closeSheet("gview"); await saveGroups(`${n} deleted`); };
+
 /* ---------- boot ---------- */
 (async () => {
+  // Signed in from the Sales Hub: the hub passes the Call Log code as #ac=... once.
+  const hub = /[#&]ac=([^&]+)/.exec(location.hash || "");
+  if (hub) {
+    try { history.replaceState(null, "", location.pathname + location.search); } catch {}
+    try { const j = await api("login", { method: "POST", body: { code: decodeURIComponent(hub[1]) } }); token = j.token; lsSet(TOKEN_KEY, token); return start(j.user); } catch {}
+  }
   token = lsGet(TOKEN_KEY);
   if (!token) return showLogin();
   try { const { user } = await api("me"); start(user); } catch { if (!me) showLogin(); }
