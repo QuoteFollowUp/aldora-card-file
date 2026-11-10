@@ -308,6 +308,7 @@ function openDetail(id) {
   $("dLeft").textContent = c.status === "left" ? "Undo left" : "Left company";
   $("draft").hidden = true; $("delConfirm").hidden = true; $("leftBox").hidden = true;
   renderDetailGroups(c);
+  loadCalls(c);
   raise($("detail"));
 }
 $("qEmail").addEventListener("click", (e) => { if (!current || !current.email) { e.preventDefault(); toast("No email on this contact."); } });
@@ -530,6 +531,20 @@ $("adrGo").onclick = async () => {
   catch (err) { toast(err.message); }
   finally { $("adrGo").disabled = false; }
 };
+
+/* ---------- recent calls from the Call Log app ---------- */
+const callCache = {};
+async function loadCalls(c) {
+  const wrap = $("dCallsWrap"), box = $("dCalls"); wrap.hidden = true; box.innerHTML = "";
+  try {
+    const r = callCache[c.id] || (callCache[c.id] = await api(`contacts/${encodeURIComponent(c.id)}/calls?shard=${encodeURIComponent(c.shard)}`));
+    if (current !== c) return;
+    const all = [...r.calls, ...r.companyCalls];
+    if (!all.length) return;
+    box.innerHTML = all.map((x) => `<div class="call"><div class="meta"><span>${esc(fmtDate(x.date))}</span><span>${esc(x.rep)}</span>${x.contact ? `<span>with ${esc(x.contact)}</span>` : ""}${x.match === "company" ? `<span class="pill">At this company</span>` : ""}${x.opportunity ? `<span class="pill on">${esc(x.opportunity)}</span>` : ""}</div><div class="txt">${esc(x.notes)}</div></div>`).join("");
+    wrap.hidden = false;
+  } catch {}
+}
 
 /* ---------- my groups ---------- */
 let addTarget = null, gdoc = { myEmail: "", groups: {} }, gLoaded = false, selecting = false, selected = new Set(), pickIds = [], openGroupId = null;

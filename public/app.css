@@ -203,3 +203,9 @@ dl.info dd a{color:var(--accent);text-decoration:none}
 img.thumb.card{object-fit:cover;background:#fff;display:block}
 .thumb.logo{background:#fff url(/aldora-logo.png) center/78% auto no-repeat}
 .cardphoto{max-height:260px;object-fit:contain;background:#fff}
+
+.calls{display:grid;gap:8px}
+.call{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:4px}
+.call .meta{font:500 12px var(--mono);color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+.call .meta .pill{font-family:var(--body)}
+.call .txt{white-space:pre-wrap;font-size:14px;line-height:1.45}

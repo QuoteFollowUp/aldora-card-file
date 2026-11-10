@@ -221,6 +221,64 @@ async function claude({ model, max_tokens, content, failMsg }) {
   }
   throw Object.assign(new Error(failMsg || "Claude didn't return a usable answer. Try again."), { status: 422 });
 }
+// ---------- Call Log app: recent call notes ----------
+// Reads the Call Log / Quote Follow-Up app's shared snapshot (/api/data) with an ownership code
+// from the team-wide REP_ACCESS_CODES list, then keeps a slim index here for 30 minutes.
+const CALLLOG_URL = () => process.env.CALLLOG_URL || "https://aldoramobilequotefollowup.netlify.app/api/data";
+const coKey = (s) => String(s || "").toLowerCase().replace(/\b(inc|llc|co|corp|company|incorporated|ltd|the|dba)\b\.?/g, "").replace(/[^a-z0-9]/g, "");
+const personKey = (s) => String(s || "").toLowerCase().replace(/[^a-z ]/g, " ").trim().split(/\s+/)[0] || "";
+function callDate(c) {
+  const m = String(c.date || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  const d = new Date(c.loggedAt || c.createdAt || c.date || 0); return isNaN(d) ? "" : d.toISOString().slice(0, 10);
+}
+let callIdxMem = null;
+async function callIndex() {
+  if (callIdxMem && now() - callIdxMem.builtAt < 30 * 60e3) return callIdxMem;
+  const cached = await getJSON("callidx", null);
+  if (cached && now() - cached.builtAt < 30 * 60e3) return (callIdxMem = cached);
+  const own = Object.entries(codeMap()).find(([, v]) => /^@(view|all|owner|ownership|admin)\b/i.test(String(v)));
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 12000);
+  try {
+    const r = await fetch(CALLLOG_URL(), { signal: ac.signal, headers: own ? { "x-access-code": own[0] } : {} });
+    if (!r.ok) throw new Error("Call Log answered " + r.status);
+    const snap = await r.json();
+    const calls = (Array.isArray(snap.calls) ? snap.calls : []).filter((c) => c && c.customer && String(c.pulse || "").trim());
+    const byEmail = {}, byCust = {};
+    const push = (map, k, c) => { if (!k) return; (map[k] = map[k] || []).push(c); };
+    for (const c of calls) {
+      const slim = { date: callDate(c), rep: String(c.rep || ""), customer: String(c.customer || ""), contact: String(c.contactName || ""), notes: String(c.pulse || "").trim().slice(0, 700), opportunity: String(c.bigCat || c.quotedProduct || ""), quotedJob: String(c.quotedJob || ""), barrier: String(c.barrier || "") };
+      push(byEmail, String(c.contactEmail || "").trim().toLowerCase(), slim);
+      push(byCust, coKey(c.customer), slim);
+    }
+    const trim = (map, n) => { for (const k in map) map[k] = map[k].sort((a, b) => b.date.localeCompare(a.date)).slice(0, n); };
+    trim(byEmail, 3); trim(byCust, 6);
+    callIdxMem = { builtAt: now(), count: calls.length, byEmail, byCust };
+    await store().setJSON("callidx", callIdxMem);
+    return callIdxMem;
+  } catch (e) {
+    console.error("Call Log fetch failed:", e.message);
+    if (cached) return (callIdxMem = cached);
+    return { builtAt: 0, count: 0, byEmail: {}, byCust: {} };
+  } finally { clearTimeout(t); }
+}
+// Most recent calls for one contact: their own calls first, then calls at that customer.
+// Reps only get calls they logged themselves.
+async function recentCalls(c, user) {
+  const idx = await callIndex();
+  const rk = (s) => String(s || "").toLowerCase().replace(/[^a-z]/g, "").replace(/(.)\1/g, "$1");
+  const mine = (x) => user.role !== "rep" || rk(x.rep) === rk(user.name);
+  const email = String(c.email || "").trim().toLowerCase();
+  const first = personKey(c.first || "");
+  let list = email ? (idx.byEmail[email] || []) : [];
+  const atCo = idx.byCust[coKey(c.company)] || [];
+  if (!list.length && first) list = atCo.filter((x) => personKey(x.contact) === first);
+  const direct = list.filter(mine);
+  const seen = new Set(direct.map((x) => x.date + x.notes.slice(0, 40)));
+  const company = atCo.filter(mine).filter((x) => !seen.has(x.date + x.notes.slice(0, 40)));
+  return { calls: direct.slice(0, 3).map((x) => ({ ...x, match: "contact" })), companyCalls: company.slice(0, 3).map((x) => ({ ...x, match: "company" })), source: idx.count ? "calllog" : "unavailable" };
+}
+
 const CATS = ["Commercial Glazier", "Glazier / Glass Shop", "Mom-Pop Shop", "Shower Door Company", "Specialty Company", "Dealer / Distributor", "Franchised Glass Company", "General Contractor / Builder", "Architect / Designer", "Insulation Company", "Other"];
 
 // ---------- routes ----------
@@ -342,6 +400,10 @@ export default async (req) => {
         return json(200, { contact: { id, shard, ...out } });
       }
 
+      if (method === "GET" && action === "calls") {
+        return json(200, await recentCalls(found.contact, user));
+      }
+
       if (method === "GET" && action === "photo") {
         const p = await store().get(`photo/${shard}/${id}`);
         return p ? json(200, { photo: p }) : err(404, "No photo.");
@@ -378,14 +440,17 @@ Rules: copy text exactly as printed. If a phone is marked cell, mobile, M or C p
     // ---- Claude: draft a follow-up ----
     if (parts[0] === "draft" && method === "POST") {
       const c = body.contact || {};
+      let rc = { calls: [], companyCalls: [] };
+      try { rc = await recentCalls(c, user); } catch {}
+      const lastCalls = [...rc.calls, ...rc.companyCalls].slice(0, 3).map((x) => ({ date: x.date, rep: x.rep, spokeWith: x.contact, notes: x.notes, opportunity: x.opportunity, quotedJob: x.quotedJob, barrier: x.barrier }));
       const sf = c.sfStatus === "GAP" ? "has storefront opportunity but no storefront quotes with us" : c.sfStatus === "ADD" ? "we are quoting them storefront" : c.sfStatus === "Aligned" ? "active storefront quoting" : "";
       const sender = isAdmin ? "Fred Haas, Corporate Commercial Metal Manager" : `${user.name}, Aldora sales`;
       const out = await claude({
         model: process.env.CLAUDE_DRAFT_MODEL || "claude-sonnet-5-5", max_tokens: 1200,
         failMsg: "Couldn't write the draft this time. Tap Draft follow-up again.",
         content: [{ type: "text", text: `Write a short follow-up email from ${sender} at Aldora Aluminum & Glass Products (commercial storefront, entrances, aluminum framing and glass; fabrication branches across the South and Mid-Atlantic) to this contact.
-Contact: ${JSON.stringify({ name: [c.first, c.last].filter(Boolean).join(" "), title: c.title, company: c.company, accountType: c.category, branch: c.branch, aldoraRep: isAdmin ? c.rep : "", products: c.products, storefrontStatus: sf, lastCallDate: c.lastCall || "", lastCallNotes: String(c.lastNote || "").slice(0, 1500), openQuotes: c.openQuotes ? `${c.openQuotes} open quotes worth about $${Math.round(c.openQuoteUsd || 0)}` : "", met: c.met && !String(c.met).startsWith("Call log") ? c.met : "", notes: c.notes })}
-Style: plain, direct, short sentences. 60 to 110 words. No em dashes. No filler words like leverage, synergy, robust, seamless. Reference where they met or the notes if given. If last call notes are given, pick up where that call left off and follow through on what was discussed; that comes first. If they have open quotes, offer to answer questions or update pricing on them. If they have a storefront gap, invite them to send their next storefront or entrance takeoff for pricing. If an Aldora rep is named, say that rep stays their day-to-day contact. End with one concrete next step. Sign off with the sender's name, then "Aldora Aluminum & Glass Products".
+Contact: ${JSON.stringify({ name: [c.first, c.last].filter(Boolean).join(" "), title: c.title, company: c.company, accountType: c.category, branch: c.branch, aldoraRep: isAdmin ? c.rep : "", products: c.products, storefrontStatus: sf, lastCallDate: c.lastCall || "", lastCallNotes: String(c.lastNote || "").slice(0, 1500), recentCallsFromCallLog: lastCalls, openQuotes: c.openQuotes ? `${c.openQuotes} open quotes worth about $${Math.round(c.openQuoteUsd || 0)}` : "", met: c.met && !String(c.met).startsWith("Call log") ? c.met : "", notes: c.notes })}
+Style: plain, direct, short sentences. 60 to 110 words. No em dashes. No filler words like leverage, synergy, robust, seamless. Reference where they met or the notes if given. If recent calls from the call log or last call notes are given, the most recent one comes first: pick up where that call left off and follow through on what was discussed, the opportunity, and any quoted job. Never mention a barrier, a competitor, or an internal note word for word. Never invent details that aren't in the notes. If they have open quotes, offer to answer questions or update pricing on them. If they have a storefront gap, invite them to send their next storefront or entrance takeoff for pricing. If an Aldora rep is named, say that rep stays their day-to-day contact. End with one concrete next step. Sign off with the sender's name, then "Aldora Aluminum & Glass Products".
 Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       });
       return json(200, out);
