@@ -196,3 +196,5 @@ dl.info dd a{color:var(--accent);text-decoration:none}
 .selbar{display:grid;grid-template-columns:1fr auto;gap:8px 10px;align-items:center}
 .selbar #selAll{justify-self:end}
 .selbar .btn.primary{flex:none;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Desktop: mouse can't swipe a hidden-scrollbar row, so let the type chips wrap instead */
+@media (hover:hover) and (pointer:fine){.chips{flex-wrap:wrap;overflow:visible}}
