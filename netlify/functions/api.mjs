@@ -193,8 +193,8 @@ async function claude({ model, max_tokens, content }) {
     const j = await r.json();
     if (!r.ok) {
       const m = String(j?.error?.message || "");
-      if (/credit balance|billing/i.test(m)) throw Object.assign(new Error("Card reading and drafts are paused. The Aldora Anthropic account needs credit. Tell Fred."), { status: 503 });
-      if (r.status === 401) throw Object.assign(new Error("Card reading isn't connected. The API key in Netlify is missing or wrong. Tell Fred."), { status: 503 });
+      if (/credit balance|billing/i.test(m)) throw Object.assign(new Error("Card reading and scanning is paused. Contact Fred Haas."), { status: 503 });
+      if (r.status === 401) throw Object.assign(new Error("Card reading and scanning is paused. Contact Fred Haas."), { status: 503 });
       throw Object.assign(new Error(m || "Claude request failed."), { status: 502 });
     }
     const text = (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
