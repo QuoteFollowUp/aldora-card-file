@@ -180,31 +180,46 @@ async function findContact(user, id, shardHint) {
 }
 
 // ---------- Claude ----------
-async function claude({ model, max_tokens, content }) {
+// Ask Claude for a JSON answer. One quiet retry if the reply has no usable JSON
+// (blurry photo, cut-off reply). The raw reply goes to the Netlify function log for debugging.
+function pickJSON(text) {
+  const t = String(text || "").replace(/```(?:json)?/gi, "");
+  const a = t.indexOf("{"), b = t.lastIndexOf("}");
+  if (a < 0 || b <= a) return null;
+  try { return JSON.parse(t.slice(a, b + 1)); } catch { return null; }
+}
+async function claude({ model, max_tokens, content, failMsg }) {
   const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw Object.assign(new Error("Card reading isn't set up yet. Add ANTHROPIC_API_KEY in Netlify."), { status: 503 });
-  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 24000);
-  try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST", signal: ac.signal,
-      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model, max_tokens, messages: [{ role: "user", content }] }),
-    });
-    const j = await r.json();
-    if (!r.ok) {
-      const m = String(j?.error?.message || "");
-      if (/credit balance|billing/i.test(m)) throw Object.assign(new Error("Card reading and scanning is paused. Contact Fred Haas."), { status: 503 });
-      if (r.status === 401) throw Object.assign(new Error("Card reading and scanning is paused. Contact Fred Haas."), { status: 503 });
-      throw Object.assign(new Error(m || "Claude request failed."), { status: 502 });
-    }
-    const text = (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) throw Object.assign(new Error("Couldn't read a result. Try again."), { status: 502 });
-    return JSON.parse(m[0]);
-  } catch (e) {
-    if (e.name === "AbortError") throw Object.assign(new Error("That took too long. Try again."), { status: 504 });
-    throw e;
-  } finally { clearTimeout(t); }
+  if (!key) throw Object.assign(new Error("Card reading and scanning is paused. Contact Fred Haas."), { status: 503 });
+  const start = now();
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), Math.max(4000, 24000 - (now() - start)));
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST", signal: ac.signal,
+        headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({ model, max_tokens, messages: [{ role: "user", content: attempt === 1 ? content : [...content, { type: "text", text: "Reply with the JSON object only. No other text." }] }] }),
+      });
+      const j = await r.json();
+      if (!r.ok) {
+        const m = String(j?.error?.message || "");
+        console.error("Claude error", r.status, m);
+        if (/credit balance|billing/i.test(m) || r.status === 401 || r.status === 403) throw Object.assign(new Error("Card reading and scanning is paused. Contact Fred Haas."), { status: 503 });
+        if (r.status === 404 || /model/i.test(m)) throw Object.assign(new Error("Card reading and scanning is paused. Contact Fred Haas."), { status: 503 });
+        if (r.status === 429 || r.status === 529) throw Object.assign(new Error("Claude is busy right now. Try again in a minute."), { status: 503 });
+        throw Object.assign(new Error("Claude didn't answer. Try again."), { status: 502 });
+      }
+      const text = (j.content || []).filter((x) => x.type === "text").map((x) => x.text).join("");
+      const out = pickJSON(text);
+      if (out) return out;
+      console.error(`Claude reply without JSON (attempt ${attempt}, stop: ${j.stop_reason}):`, text.slice(0, 600));
+      if (now() - start > 14000) break;
+    } catch (e) {
+      if (e.name === "AbortError") throw Object.assign(new Error("That took too long. Try again."), { status: 504 });
+      throw e;
+    } finally { clearTimeout(t); }
+  }
+  throw Object.assign(new Error(failMsg || "Claude didn't return a usable answer. Try again."), { status: 422 });
 }
 const CATS = ["Commercial Glazier", "Glazier / Glass Shop", "Mom-Pop Shop", "Shower Door Company", "Specialty Company", "Dealer / Distributor", "Franchised Glass Company", "General Contractor / Builder", "Architect / Designer", "Insulation Company", "Other"];
 
@@ -349,7 +364,8 @@ export default async (req) => {
       const m = img.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
       if (!m || img.length > 3_000_000) return err(400, "Send a JPEG or PNG photo.");
       const out = await claude({
-        model: process.env.CLAUDE_SCAN_MODEL || "claude-haiku-5-5", max_tokens: 600,
+        model: process.env.CLAUDE_SCAN_MODEL || "claude-haiku-5-5", max_tokens: 1000,
+        failMsg: "Couldn't read that card. Retake the photo flat, in good light, with the card filling the frame.",
         content: [
           { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } },
           { type: "text", text: `This photo is a business card handed to a commercial glass and aluminum (storefront, entrances, curtain wall) salesperson. Read it and return ONLY a JSON object with these string keys: first, last, title, company, email, mobile, office, website, address, city, state, zip, category.
@@ -365,7 +381,8 @@ Rules: copy text exactly as printed. If a phone is marked cell, mobile, M or C p
       const sf = c.sfStatus === "GAP" ? "has storefront opportunity but no storefront quotes with us" : c.sfStatus === "ADD" ? "we are quoting them storefront" : c.sfStatus === "Aligned" ? "active storefront quoting" : "";
       const sender = isAdmin ? "Fred Haas, Corporate Commercial Metal Manager" : `${user.name}, Aldora sales`;
       const out = await claude({
-        model: process.env.CLAUDE_DRAFT_MODEL || "claude-sonnet-5-5", max_tokens: 700,
+        model: process.env.CLAUDE_DRAFT_MODEL || "claude-sonnet-5-5", max_tokens: 1200,
+        failMsg: "Couldn't write the draft this time. Tap Draft follow-up again.",
         content: [{ type: "text", text: `Write a short follow-up email from ${sender} at Aldora Aluminum & Glass Products (commercial storefront, entrances, aluminum framing and glass; fabrication branches across the South and Mid-Atlantic) to this contact.
 Contact: ${JSON.stringify({ name: [c.first, c.last].filter(Boolean).join(" "), title: c.title, company: c.company, accountType: c.category, branch: c.branch, aldoraRep: isAdmin ? c.rep : "", products: c.products, storefrontStatus: sf, lastCallDate: c.lastCall || "", lastCallNotes: String(c.lastNote || "").slice(0, 1500), openQuotes: c.openQuotes ? `${c.openQuotes} open quotes worth about $${Math.round(c.openQuoteUsd || 0)}` : "", met: c.met && !String(c.met).startsWith("Call log") ? c.met : "", notes: c.notes })}
 Style: plain, direct, short sentences. 60 to 110 words. No em dashes. No filler words like leverage, synergy, robust, seamless. Reference where they met or the notes if given. If last call notes are given, pick up where that call left off and follow through on what was discussed; that comes first. If they have open quotes, offer to answer questions or update pricing on them. If they have a storefront gap, invite them to send their next storefront or entrance takeoff for pricing. If an Aldora rep is named, say that rep stays their day-to-day contact. End with one concrete next step. Sign off with the sender's name, then "Aldora Aluminum & Glass Products".
