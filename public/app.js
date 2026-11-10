@@ -120,7 +120,7 @@ function renderList() {
   const v = visible(base), mgr = me && me.role !== "rep";
   $("count").textContent = loaded ? `${cards.filter((c) => c.status !== "left").length.toLocaleString()} contacts` : "Loading…";
   $("list").innerHTML = v.slice(0, shown).map((c) => `<li><button class="row${c.status === "left" ? " left" : ""}${selecting ? " selectable" : ""}" type="button" data-id="${esc(c.id)}"${selecting ? ` aria-pressed="${selected.has(c.id)}"` : ""}>
-    ${selecting ? `<span class="tick" aria-hidden="true"></span>` : `<span class="thumb"${c.hasPhoto ? ' style="background:var(--accent-soft)" title="Card photo on file"' : ""}></span>`}
+    ${selecting ? `<span class="tick" aria-hidden="true"></span>` : c.thumb ? `<img class="thumb card" src="${esc(c.thumb)}" alt="" loading="lazy">` : `<span class="thumb logo${c.hasPhoto ? " pending" : ""}" aria-hidden="true"></span>`}
     <span class="who"><div class="name">${esc(c.company || personName(c) || "Unnamed contact")}</div><div class="co2">${esc(c.company ? [personName(c) || "No contact name", c.title].filter(Boolean).join(" · ") : c.title || "")}</div><div class="ph">${esc([primaryPhone(c), mgr ? c.rep : ""].filter(Boolean).join(" · "))}</div></span>
     <span class="meta">${c.status === "left" ? `<span class="tag gone">Left</span>` : isDue(c) ? `<span class="tag due">Follow up</span>` : `<span class="tag">${esc(c.category || "Unassigned")}</span>`}${c.branch || c.city ? `<span class="loc">${esc(mgr ? c.branch : [c.city, c.state].filter(Boolean).join(", ") || c.branch)}</span>` : ""}</span>
   </button></li>`).join("");
@@ -167,6 +167,13 @@ $("exportBtn").onclick = () => {
 /* ---------- photos and scanning ---------- */
 function loadImg(file) { return new Promise((res, rej) => { const u = URL.createObjectURL(file), i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = u; }); }
 function scaled(img, max, q) { const s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement("canvas"); c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); return c.toDataURL("image/jpeg", q); }
+function makeThumb(img) { // 168x100 card-shaped crop, about 4 KB
+  const W = 168, H = 100, c = document.createElement("canvas"); c.width = W; c.height = H;
+  const r = Math.max(W / img.naturalWidth, H / img.naturalHeight), w = img.naturalWidth * r, h = img.naturalHeight * r;
+  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+  return c.toDataURL("image/jpeg", 0.7);
+}
+let pendingThumb = null;
 function smallPhoto(img) { let w = 900, q = 0.62, url; do { url = scaled(img, w, q); w -= 150; q -= 0.08; } while (url.length > 180000 && w > 300); return url; }
 function findMatch(out) {
   const em = (out.email || "").trim().toLowerCase();
@@ -180,7 +187,7 @@ $("cam").addEventListener("change", async (e) => {
   const file = e.target.files[0]; e.target.value = ""; if (!file) return;
   openEdit(null);
   let img; try { img = await loadImg(file); } catch { showRead("That photo couldn't be opened. Try again, or type the card in.", false); return; }
-  pendingPhoto = smallPhoto(img); $("editPhoto").src = pendingPhoto; $("editPhoto").hidden = false;
+  pendingPhoto = smallPhoto(img); pendingThumb = makeThumb(img); $("editPhoto").src = pendingPhoto; $("editPhoto").hidden = false;
   const job = ++readJob; showRead("Reading the card…", true);
   try {
     const { fields: out } = await api("scan", { method: "POST", body: { image: scaled(img, 1400, 0.82) } });
@@ -218,7 +225,7 @@ $("addPhone").onclick = () => addPhoneRow().querySelector(".xl").focus();
 $("addAddr").onclick = () => addAddrRow().querySelector(".xl").focus();
 ["xPhones", "xAddrs"].forEach((id) => $(id).addEventListener("click", (e) => { const b = e.target.closest(".x"); if (b) b.closest(".xrow").remove(); }));
 function openEdit(c, preset) {
-  editing = c; pendingPhoto = null; readJob++;
+  editing = c; pendingPhoto = null; pendingThumb = null; readJob++;
   $("editTitle").textContent = c ? "Edit contact" : "New card";
   FIELDS.forEach((k) => ($(fid(k)).value = c ? c[k] || "" : ""));
   $("xPhones").innerHTML = ""; $("xAddrs").innerHTML = "";
@@ -250,12 +257,12 @@ $("form").addEventListener("submit", async (e) => {
       const patch = {}; for (const k in data) if ((editing[k] || "") !== data[k]) patch[k] = data[k];
       for (const k in lists) if (JSON.stringify(editing[k] || []) !== JSON.stringify(lists[k])) patch[k] = lists[k];
       if (me.role !== "admin") delete patch.branch;
-      if (pendingPhoto) patch.photo = pendingPhoto;
+      if (pendingPhoto) { patch.photo = pendingPhoto; if (pendingThumb) patch.thumb = pendingThumb; }
       if (!Object.keys(patch).length) { $("edit").hidden = true; if ($("detail").hidden) closeSheets(); return; }
       const { contact } = await api("contacts/" + encodeURIComponent(editing.id), { method: "PUT", body: { shard: editing.shard, patch } });
       upsertLocal(contact); $("edit").hidden = true; toast("Contact updated"); openDetail(contact.id);
     } else {
-      const { contact } = await api("contacts", { method: "POST", body: { contact: { ...data, ...lists, photo: pendingPhoto || "" } } });
+      const { contact } = await api("contacts", { method: "POST", body: { contact: { ...data, ...lists, photo: pendingPhoto || "", thumb: pendingPhoto ? pendingThumb || "" : "" } } });
       upsertLocal(contact); closeSheets(); toast(`${fullName(contact)} filed`);
     }
   } catch (err) { $("saveBtn").disabled = false; toast(err.message); }
@@ -265,7 +272,10 @@ $("form").addEventListener("submit", async (e) => {
 const photoCache = {};
 async function loadPhoto(c, imgEl) {
   imgEl.hidden = true;
-  try { const p = photoCache[c.id] || (photoCache[c.id] = (await api(`contacts/${encodeURIComponent(c.id)}/photo?shard=${encodeURIComponent(c.shard)}`)).photo); imgEl.src = p; imgEl.hidden = false; } catch {}
+  try {
+    const p = photoCache[c.id] || (photoCache[c.id] = (await api(`contacts/${encodeURIComponent(c.id)}/photo?shard=${encodeURIComponent(c.shard)}`)).photo); imgEl.src = p; imgEl.hidden = false;
+    if (!c.thumb && !(me && me.ro)) { const im = new Image(); im.onload = async () => { try { const { contact } = await api("contacts/" + encodeURIComponent(c.id), { method: "PUT", body: { shard: c.shard, patch: { thumb: makeThumb(im) } } }); upsertLocal(contact); } catch {} }; im.src = p; }
+  } catch {}
 }
 function infoRows(el, lines, copyable) {
   const canCopy = (l) => copyable ? copyable.includes(l[0]) : l[3] === "tel" || l[0] === "Email" || /\n|\d{5}/.test(l[1]) && !/^(Met|Notes|Replaced by)$/.test(l[0]);

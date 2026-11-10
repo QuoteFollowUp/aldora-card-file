@@ -163,6 +163,8 @@ function canSee(user, shard, contact) {
 function clean(c) { const o = { ...c }; delete o.photo; return o; }
 const fmtList = (k, v) => (v || []).map((x) => k === "phones" ? `${x.label ? x.label + ": " : ""}${x.number}` : `${x.label ? x.label + ": " : ""}${[x.address, x.city, x.state, x.zip].filter(Boolean).join(", ")}`).join("; ");
 function diff(a, b, keys) { const d = {}; for (const k of keys) { if (LISTS.includes(k)) { const x = fmtList(k, a[k]), y = fmtList(k, b[k]); if (x !== y) d[k] = [x, y]; continue; } const x = a[k] ?? "", y = b[k] ?? ""; if (String(x) !== String(y)) d[k] = [x, y]; } return d; }
+// Small card thumbnail kept on the contact itself so the list can show it without loading photos.
+const cleanThumb = (v) => (typeof v === "string" && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(v) && v.length <= 24000 ? v : "");
 async function savePhoto(shard, id, dataUrl) {
   if (!dataUrl) return false;
   if (!/^data:image\/(jpeg|png|webp);base64,/.test(dataUrl) || dataUrl.length > 600000) throw new Error("Photo format not accepted.");
@@ -264,7 +266,7 @@ export default async (req) => {
       }
       const id = "c-" + rid(6);
       const hasPhoto = await savePhoto(shard, id, body.contact?.photo);
-      const rec = { ...c, rep, branch, hasPhoto, status: "", created: now(), updated: now(), createdBy: user.name, editedFields: [] };
+      const rec = { ...c, rep, branch, hasPhoto, thumb: hasPhoto ? cleanThumb(body.contact?.thumb) : "", status: "", created: now(), updated: now(), createdBy: user.name, editedFields: [] };
       await mutate("shard/" + shard, { contacts: {} }, (d) => { d.contacts[id] = rec; });
       await writeLog({ by: user.name, role: user.role, action: "added", id, shard, contact: [c.first, c.last].filter(Boolean).join(" ") || c.company, company: c.company, branch, rep });
       return json(200, { contact: { id, shard, ...rec } });
@@ -286,6 +288,7 @@ export default async (req) => {
           const next = { ...cur };
           for (const k of EDITABLE) if (patch[k] !== undefined) next[k] = String(patch[k]).trim().slice(0, 2000);
           for (const k of LISTS) if (patch[k] !== undefined) next[k] = cleanList(k, patch[k]);
+          if (patch.thumb !== undefined) next.thumb = cleanThumb(patch.thumb);
           if (isAdmin) for (const k of ADMIN_ONLY) if (patch[k] !== undefined) next[k] = k === "rep" ? canonRep(patch[k]) : String(patch[k]).trim();
           changes = diff(cur, next, [...EDITABLE, ...LISTS, ...ADMIN_ONLY]);
           next.editedFields = [...new Set([...(cur.editedFields || []), ...Object.keys(changes).filter((k) => !ADMIN_ONLY.includes(k))])];
