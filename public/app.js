@@ -302,7 +302,7 @@ function openDetail(id) {
   $("dCoLbl").textContent = others.length ? `${others.length} other contact${others.length === 1 ? "" : "s"} at ${c.company}` : c.company ? `No other contacts at ${c.company}` : "Company";
   $("dCoList").innerHTML = others.map((x) => `<li><button class="row${x.status === "left" ? " left" : ""}" type="button" data-id="${esc(x.id)}" style="grid-template-columns:1fr auto"><span class="who"><div class="name">${esc(personName(x) || "No contact name")}</div><div class="co2">${esc([x.title, x.email].filter(Boolean).join(" · "))}</div></span><span class="meta">${x.status === "left" ? `<span class="tag gone">Left</span>` : `<span class="loc">${esc(x.mobile || x.office || "")}</span>`}</span></button></li>`).join("");
   $("dAddCo").hidden = !c.company;
-  const acct = [["Branch", c.branch, 0], ["Rep", c.rep, 0], ["Top focus", c.topGroup, 0], ["Products", (c.products || []).join(", "), 0], ["Last call", fmtDate(c.lastCall), 1], ["Calls", c.calls ? String(c.calls) : "", 1], ["Open quotes", c.openQuotes ? `${c.openQuotes} · ${money(c.openQuoteUsd)}` : "", 1], ["Storefront $", c.sfQuoteUsd ? money(c.sfQuoteUsd) : "", 1], ["Last edit", c.updatedBy ? `${c.updatedBy}, ${new Date(c.updated).toLocaleDateString()}` : "", 0]].filter((l) => l[1]);
+  const acct = [["Branch", c.branch, 0], ["Rep", c.rep, 0], ["Top focus", c.topGroup, 0], ["Products", (c.products || []).join(", "), 0], ["Last call", fmtDate(c.lastCall), 1], ["Call notes", c.lastNote, 0], ["Calls", c.calls ? String(c.calls) : "", 1], ["Open quotes", c.openQuotes ? `${c.openQuotes} · ${money(c.openQuoteUsd)}` : "", 1], ["Storefront $", c.sfQuoteUsd ? money(c.sfQuoteUsd) : "", 1], ["Last edit", c.updatedBy ? `${c.updatedBy}, ${new Date(c.updated).toLocaleDateString()}` : "", 0]].filter((l) => l[1]);
   $("dAcctWrap").hidden = !acct.length; infoRows($("dAcct"), acct, []);
   $("dPhoto").hidden = true; if (c.hasPhoto) loadPhoto(c, $("dPhoto"));
   $("dLeft").textContent = c.status === "left" ? "Undo left" : "Left company";
@@ -474,7 +474,8 @@ function cleanCallLog(rows) {
       category: TYPEMAP[r["Account Type"]] || r["Account Type"] || "Unassigned",
       branch: r["Branch"] || "", rep: r["Sales Rep"] || "",
       products: GROUPS.filter((g) => r[g]), topGroup: r["Top Opportunity Group"] || "",
-      sfStatus: String(r["Storefront Status"] || "").split(":")[0], lastCall: lc, calls: +r["Calls Logged"] || 0,
+      sfStatus: String(r["Storefront Status"] || "").split(":")[0], lastCall: lc,
+      lastNote: String(r["Last Call Notes"] ?? r["Last Call Note"] ?? r["Last Call Summary"] ?? r["Call Notes"] ?? r["Notes"] ?? "").trim().slice(0, 1500), calls: +r["Calls Logged"] || 0,
       openQuotes: +r["Customer Open Quotes"] || 0, openQuoteUsd: Math.round(+r["Customer Open Quote $"] || 0), sfQuoteUsd: Math.round(+r["Customer Storefront Quote $"] || 0),
       met: "Call log import", notes: note, created: lc ? new Date(lc + "T12:00").getTime() : 0,
     };

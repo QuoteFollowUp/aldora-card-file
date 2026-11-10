@@ -367,8 +367,8 @@ Rules: copy text exactly as printed. If a phone is marked cell, mobile, M or C p
       const out = await claude({
         model: process.env.CLAUDE_DRAFT_MODEL || "claude-sonnet-5-5", max_tokens: 700,
         content: [{ type: "text", text: `Write a short follow-up email from ${sender} at Aldora Aluminum & Glass Products (commercial storefront, entrances, aluminum framing and glass; fabrication branches across the South and Mid-Atlantic) to this contact.
-Contact: ${JSON.stringify({ name: [c.first, c.last].filter(Boolean).join(" "), title: c.title, company: c.company, accountType: c.category, branch: c.branch, aldoraRep: isAdmin ? c.rep : "", products: c.products, storefrontStatus: sf, met: c.met && !String(c.met).startsWith("Call log") ? c.met : "", notes: c.notes })}
-Style: plain, direct, short sentences. 60 to 110 words. No em dashes. No filler words like leverage, synergy, robust, seamless. Reference where they met or the notes if given. If they have a storefront gap, invite them to send their next storefront or entrance takeoff for pricing. If an Aldora rep is named, say that rep stays their day-to-day contact. End with one concrete next step. Sign off with the sender's name, then "Aldora Aluminum & Glass Products".
+Contact: ${JSON.stringify({ name: [c.first, c.last].filter(Boolean).join(" "), title: c.title, company: c.company, accountType: c.category, branch: c.branch, aldoraRep: isAdmin ? c.rep : "", products: c.products, storefrontStatus: sf, lastCallDate: c.lastCall || "", lastCallNotes: String(c.lastNote || "").slice(0, 1500), openQuotes: c.openQuotes ? `${c.openQuotes} open quotes worth about $${Math.round(c.openQuoteUsd || 0)}` : "", met: c.met && !String(c.met).startsWith("Call log") ? c.met : "", notes: c.notes })}
+Style: plain, direct, short sentences. 60 to 110 words. No em dashes. No filler words like leverage, synergy, robust, seamless. Reference where they met or the notes if given. If last call notes are given, pick up where that call left off and follow through on what was discussed; that comes first. If they have open quotes, offer to answer questions or update pricing on them. If they have a storefront gap, invite them to send their next storefront or entrance takeoff for pricing. If an Aldora rep is named, say that rep stays their day-to-day contact. End with one concrete next step. Sign off with the sender's name, then "Aldora Aluminum & Glass Products".
 Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       });
       return json(200, out);
@@ -444,7 +444,7 @@ Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       const keyOf = (c) => (c.email ? c.email.toLowerCase() : ((c.company || "") + "|" + (c.first || "") + " " + (c.last || "")).toLowerCase());
       const index = {};
       for (const [s, cs] of Object.entries(shards)) for (const [id, c] of Object.entries(cs)) index[keyOf(c)] = { s, id };
-      const LOG_FIELDS = ["products", "topGroup", "sfStatus", "lastCall", "calls", "openQuotes", "openQuoteUsd", "sfQuoteUsd"];
+      const LOG_FIELDS = ["products", "topGroup", "sfStatus", "lastCall", "lastNote", "calls", "openQuotes", "openQuoteUsd", "sfQuoteUsd"];
       const SOFT = ["first", "last", "company", "email", "office", "mobile", "category"];
       const dirty = new Set(); let added = 0, updated = 0, movedN = 0; const moves = []; const repBranches = {};
       for (const raw of incoming) {
