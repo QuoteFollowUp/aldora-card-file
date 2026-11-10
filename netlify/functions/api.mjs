@@ -445,14 +445,25 @@ Rules: copy text exactly as printed. If a phone is marked cell, mobile, M or C p
       const lastCalls = [...rc.calls, ...rc.companyCalls].slice(0, 3).map((x) => ({ date: x.date, rep: x.rep, spokeWith: x.contact, notes: x.notes, opportunity: x.opportunity, quotedJob: x.quotedJob, barrier: x.barrier }));
       const sf = c.sfStatus === "GAP" ? "has storefront opportunity but no storefront quotes with us" : c.sfStatus === "ADD" ? "we are quoting them storefront" : c.sfStatus === "Aligned" ? "active storefront quoting" : "";
       const sender = isAdmin ? "Fred Haas, Corporate Commercial Metal Manager" : `${user.name}, Aldora sales`;
+      const signName = isAdmin ? "Fred Haas" : user.name;
       const out = await claude({
         model: process.env.CLAUDE_DRAFT_MODEL || "claude-sonnet-5-5", max_tokens: 1200,
         failMsg: "Couldn't write the draft this time. Tap Draft follow-up again.",
-        content: [{ type: "text", text: `Write a short follow-up email from ${sender} at Aldora Aluminum & Glass Products (commercial storefront, entrances, aluminum framing and glass; fabrication branches across the South and Mid-Atlantic) to this contact.
-Contact: ${JSON.stringify({ name: [c.first, c.last].filter(Boolean).join(" "), title: c.title, company: c.company, accountType: c.category, branch: c.branch, aldoraRep: isAdmin ? c.rep : "", products: c.products, storefrontStatus: sf, lastCallDate: c.lastCall || "", lastCallNotes: String(c.lastNote || "").slice(0, 1500), recentCallsFromCallLog: lastCalls, openQuotes: c.openQuotes ? `${c.openQuotes} open quotes worth about $${Math.round(c.openQuoteUsd || 0)}` : "", met: c.met && !String(c.met).startsWith("Call log") ? c.met : "", notes: c.notes })}
-Style: plain, direct, short sentences. 60 to 110 words. No em dashes. No filler words like leverage, synergy, robust, seamless. Reference where they met or the notes if given. If recent calls from the call log or last call notes are given, the most recent one comes first: pick up where that call left off and follow through on what was discussed, the opportunity, and any quoted job. Never mention a barrier, a competitor, or an internal note word for word. Never invent details that aren't in the notes. If they have open quotes, offer to answer questions or update pricing on them. If they have a storefront gap, invite them to send their next storefront or entrance takeoff for pricing. If an Aldora rep is named, say that rep stays their day-to-day contact. End with one concrete next step. Sign off with the sender's name, then "Aldora Aluminum & Glass Products".
+        content: [{ type: "text", text: `Write the opening of a short follow-up email from ${sender} at Aldora Aluminum & Glass Products (commercial storefront, entrances, aluminum framing and glass; fabrication branches across the South and Mid-Atlantic) to this contact.
+Contact: ${JSON.stringify({ name: [c.first, c.last].filter(Boolean).join(" "), title: c.title, company: c.company, accountType: c.category, branch: c.branch, aldoraRep: isAdmin ? c.rep : "", products: c.products, storefrontStatus: sf, lastCallDate: c.lastCall || "", lastCallNotes: String(c.lastNote || "").slice(0, 1500), recentCallsFromCallLog: lastCalls, met: c.met && !String(c.met).startsWith("Call log") ? c.met : "", notes: c.notes })}
+Write a greeting line with their first name, then one or two short paragraphs, 40 to 90 words total. A fixed closing paragraph about open quotes, a thank-you line and the signature are added after your text automatically, so do NOT write any closing, thanks, sign-off, signature or mention of open quotes.
+Style: plain, direct, short sentences. No em dashes. No filler words like leverage, synergy, robust, seamless. If recent calls from the call log or last call notes are given, the most recent one comes first: pick up where that call left off and follow through on what was discussed, the opportunity, and any quoted job. Otherwise reference where they met or the notes if given. Never mention a barrier, a competitor, or an internal note word for word. Never invent details that aren't in the notes. If they have a storefront gap, invite them to send their next storefront or entrance takeoff for pricing. If an Aldora rep is named, say that rep stays their day-to-day contact.
 Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       });
+      // Fixed closing. The paragraphs above stay generated from the call notes.
+      const n = +c.openQuotes || 0, usd = +c.openQuoteUsd || 0;
+      const total = usd >= 1000 ? Math.round(usd / 100) * 100 : Math.round(usd);
+      const closing = [
+        n > 0 ? `You also have ${n} open quote${n === 1 ? "" : "s"} with us, about $${total.toLocaleString("en-US")} total. Can I send you the list so you can tell me if there’s still an opportunity on any of them, or if we can close them out in our system? Your feedback helps keep us competitive in the market and is greatly appreciated. If I can re-quote anything for you, just let me know and I’ll get it submitted as soon as possible.` : "",
+        "Thanks again for your time. I hope to speak with you again soon.",
+        `${signName}\nAldora Aluminum & Glass Products`,
+      ].filter(Boolean);
+      out.body = [String(out.body || "").trim(), ...closing].join("\n\n");
       return json(200, out);
     }
 
