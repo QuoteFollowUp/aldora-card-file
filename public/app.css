@@ -209,3 +209,6 @@ img.thumb.card{object-fit:cover;background:#fff;display:block}
 .call .meta{font:500 12px var(--mono);color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
 .call .meta .pill{font-family:var(--body)}
 .call .txt{white-space:pre-wrap;font-size:14px;line-height:1.45}
+
+.selbar #selMove,.selbar #selDel{flex:none}
+#rpick{z-index:22}

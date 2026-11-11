@@ -195,6 +195,12 @@
     <button class="textbtn" id="selAll" type="button">Select all shown</button>
     <button class="btn primary" id="selAdd" type="button" disabled>Add to group</button>
     <button class="btn" id="selDone" type="button">Cancel</button>
+    <button class="btn" id="selMove" type="button" data-adminonly hidden disabled>Move to rep</button>
+    <button class="btn danger" id="selDel" type="button" data-adminonly hidden disabled>Delete</button>
+    <div class="confirm" id="selDelConfirm" hidden style="grid-column:1/-1">
+      <div id="selDelText"></div>
+      <div class="actions"><button class="btn sm danger" id="selDelYes" type="button">Delete them</button><button class="btn sm" id="selDelNo" type="button">Keep them</button></div>
+    </div>
   </div>
 </div>
 </div>
@@ -298,6 +304,15 @@
       <label for="gpickNew"><strong>Or start a new group</strong></label>
       <div class="inline"><input id="gpickNew" placeholder="Group name" style="flex:1;min-width:0"><button class="btn sm primary" id="gpickCreate" type="button" style="flex:none">Create and add</button></div>
     </div>
+  </div>
+</section>
+
+<!-- Rep picker (manager) -->
+<section class="sheet" id="rpick" hidden aria-labelledby="rpickTitle">
+  <div class="wrap">
+    <div class="sheethead"><h2 id="rpickTitle">Move to rep</h2><button class="btn sm" id="rpickCancel" type="button">Cancel</button></div>
+    <p id="rpickNote" style="margin:0;color:var(--muted)"></p>
+    <ul class="list" id="rpickList"></ul>
   </div>
 </section>
 

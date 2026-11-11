@@ -79,7 +79,9 @@ async function loadContacts() {
   loaded = false; renderList();
   try {
     const j = await api("contacts"); cards = j.contacts; reps = j.reps || []; loaded = true;
+    const keepRep = $("fRep").value;
     $("fRep").innerHTML = `<option value="">All reps</option>` + [...new Set(cards.map((c) => c.rep).filter(Boolean))].sort().map((r) => `<option>${esc(r)}</option>`).join("");
+    if ([...$("fRep").options].some((o) => o.value === keepRep)) $("fRep").value = keepRep;
     $("f_rep").innerHTML = `<option value="">Unassigned</option>` + reps.map((r) => `<option>${esc(r.name)}</option>`).join("");
     $("notice").hidden = true; renderList();
   } catch (err) { loaded = true; $("notice").hidden = false; $("notice").textContent = "Couldn't load contacts. " + err.message; renderList(); }
@@ -240,8 +242,8 @@ function openEdit(c, preset) {
 }
 let zTop = 30;
 function raise(el) { el.style.zIndex = ++zTop; el.hidden = false; el.scrollTop = 0; document.body.style.overflow = "hidden"; }
-function closeSheet(id) { $(id).hidden = true; if (["edit", "detail", "gpick", "gview"].every((x) => $(x).hidden)) document.body.style.overflow = ""; }
-function closeSheets() { ["edit", "detail", "gpick", "gview"].forEach((x) => ($(x).hidden = true)); document.body.style.overflow = ""; }
+function closeSheet(id) { $(id).hidden = true; if (["edit", "detail", "gpick", "gview", "rpick"].every((x) => $(x).hidden)) document.body.style.overflow = ""; }
+function closeSheets() { ["edit", "detail", "gpick", "gview", "rpick"].forEach((x) => ($(x).hidden = true)); document.body.style.overflow = ""; }
 $("editCancel").onclick = () => { readJob++; if (!$("detail").hidden) $("edit").hidden = true; else closeSheets(); };
 $("manual").onclick = () => openEdit(null);
 $("form").addEventListener("submit", async (e) => {
@@ -573,11 +575,37 @@ $("groupList").addEventListener("click", (e) => { const b = e.target.closest("[d
 $("newGroupBtn").onclick = async () => { const id = newGroup($("newGroupName").value); if (!id) return; $("newGroupName").value = ""; await saveGroups("Group created. Add people from Contacts."); openGroup(id); };
 
 // select mode on the contact list
-function updateSelbar() { $("selCount").textContent = `${selected.size} selected`; $("selAdd").disabled = !selected.size; }
+function updateSelbar() {
+  $("selCount").textContent = `${selected.size} selected`; $("selAdd").disabled = !selected.size;
+  const adm = me && me.role === "admin";
+  ["selMove", "selDel"].forEach((id) => { $(id).hidden = !adm; $(id).disabled = !selected.size; });
+  $("selDelConfirm").hidden = true;
+}
 function startSelect() { selecting = true; selected.clear(); $("bar").querySelector(".wrap").hidden = true; $("selbar").hidden = false; $("selectBtn").textContent = "Done"; updateSelbar(); renderList(); }
 function endSelect() { addTarget = null; $("selAdd").textContent = "Add to group"; if (!selecting) return; selecting = false; selected.clear(); $("bar").querySelector(".wrap").hidden = false; $("selbar").hidden = true; $("selectBtn").textContent = "Select"; renderList(); }
 $("selectBtn").onclick = () => (selecting ? endSelect() : startSelect());
 $("selDone").onclick = endSelect;
+// Manager: move or delete everything selected
+const selItems = () => [...selected].map(byId).filter(Boolean).map((c) => ({ id: c.id, shard: c.shard }));
+$("selMove").onclick = () => {
+  $("rpickNote").textContent = `Moving ${selected.size} contact${selected.size === 1 ? "" : "s"}. The move sticks: later call log imports won't move them back.`;
+  const opts = [{ name: "", label: "Unassigned (only managers see these)" }, ...reps.map((r) => ({ name: r.name, label: r.name + (r.branch ? " · " + r.branch : "") }))];
+  $("rpickList").innerHTML = opts.map((o) => `<li><button class="grow" type="button" data-rep="${esc(o.name)}"><span><div class="gn">${esc(o.label)}</div></span><span class="tag">Move</span></button></li>`).join("");
+  raise($("rpick"));
+};
+$("rpickCancel").onclick = () => closeSheet("rpick");
+$("rpickList").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-rep]"); if (!b) return;
+  const rep = b.dataset.rep; b.disabled = true;
+  try { const j = await api("bulk", { method: "POST", body: { action: "move", rep, items: selItems() } }); closeSheet("rpick"); endSelect(); toast(`${j.done} moved to ${rep || "Unassigned"}`); loadContacts(); }
+  catch (err) { b.disabled = false; toast(err.message); }
+});
+$("selDel").onclick = () => { $("selDelText").textContent = `Delete ${selected.size} contact${selected.size === 1 ? "" : "s"} for good? This can't be undone. A later call log import adds back any that are still in the call log.`; $("selDelConfirm").hidden = false; };
+$("selDelNo").onclick = () => ($("selDelConfirm").hidden = true);
+$("selDelYes").onclick = async () => {
+  try { const j = await api("bulk", { method: "POST", body: { action: "delete", items: selItems() } }); endSelect(); toast(`${j.done} deleted`); loadContacts(); }
+  catch (err) { toast(err.message); }
+};
 $("selAll").onclick = () => { visible().filter((c) => c.status !== "left").forEach((c) => selected.add(c.id)); updateSelbar(); renderList(); };
 $("selAdd").onclick = () => { if (addTarget && gdoc.groups[addTarget]) { const g = addTarget; pickIds = [...selected]; addTo(g).then(() => openGroup(g)); } else openPicker([...selected], `${selected.size} contact${selected.size === 1 ? "" : "s"}`); };
 
