@@ -91,6 +91,7 @@ async function sharedLogin(code) {
       d.users[slug] = { name: canonRep(s.name), role: want, branch: want === "rep" ? (REP_BRANCH[s.rep] || "") : s.branch, active: false, ver: 0, created: now() };
     }
     const u = d.users[slug];
+    if (u.role === "rep" && branchOf(u) !== (u.branch || "")) u.branch = branchOf(u);
     out = { role: u.role, name: u.name, slug, branch: u.branch || "" };
   });
   if (!out || out === "off") return out || null;
@@ -132,7 +133,10 @@ async function loadShards(slugs) {
 async function writeLog(entry) {
   await store().setJSON(`log/${String(now()).padStart(14, "0")}-${rid(3)}`, { ts: now(), ...entry });
 }
-function publicUser(slug, u) { return { slug, name: u.name, role: u.role, branch: u.branch || "", active: !!u.active, hasCode: !!u.codeHash, created: u.created || 0 }; }
+// A rep's branch always comes from the shared roster (REP_BRANCH), so a branch move there shows
+// everywhere at once. Branch managers keep the branch on their record.
+function branchOf(u) { return (u && u.role === "rep" && REP_BRANCH[canonRep(u.name)]) || (u && u.branch) || ""; }
+function publicUser(slug, u) { return { slug, name: u.name, role: u.role, branch: branchOf(u), active: !!u.active, hasCode: !!u.codeHash, created: u.created || 0 }; }
 
 // ---------- auth ----------
 async function auth(req) {
@@ -145,12 +149,12 @@ async function auth(req) {
     const { users } = await getUsers();
     const u = users[t.slug];
     if (!u || isOff(u)) return null;
-    return { ...t, name: u.name, branch: u.branch || t.branch || "", role: u.role };
+    return { ...t, name: u.name, branch: branchOf(u) || t.branch || "", role: u.role };
   }
   const { users } = await getUsers();
   const u = users[t.slug];
   if (!u || !u.active || u.ver !== t.ver) return null;
-  return { ...t, name: u.name, branch: u.branch || "", role: u.role };
+  return { ...t, name: u.name, branch: branchOf(u), role: u.role };
 }
 function canSee(user, shard, contact) {
   if (user.role === "admin") return true;
@@ -163,8 +167,6 @@ function canSee(user, shard, contact) {
 function clean(c) { const o = { ...c }; delete o.photo; return o; }
 const fmtList = (k, v) => (v || []).map((x) => k === "phones" ? `${x.label ? x.label + ": " : ""}${x.number}` : `${x.label ? x.label + ": " : ""}${[x.address, x.city, x.state, x.zip].filter(Boolean).join(", ")}`).join("; ");
 function diff(a, b, keys) { const d = {}; for (const k of keys) { if (LISTS.includes(k)) { const x = fmtList(k, a[k]), y = fmtList(k, b[k]); if (x !== y) d[k] = [x, y]; continue; } const x = a[k] ?? "", y = b[k] ?? ""; if (String(x) !== String(y)) d[k] = [x, y]; } return d; }
-// Small card thumbnail kept on the contact itself so the list can show it without loading photos.
-const cleanThumb = (v) => (typeof v === "string" && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(v) && v.length <= 24000 ? v : "");
 async function savePhoto(shard, id, dataUrl) {
   if (!dataUrl) return false;
   if (!/^data:image\/(jpeg|png|webp);base64,/.test(dataUrl) || dataUrl.length > 600000) throw new Error("Photo format not accepted.");
@@ -180,105 +182,27 @@ async function findContact(user, id, shardHint) {
 }
 
 // ---------- Claude ----------
-// Ask Claude for a JSON answer. One quiet retry if the reply has no usable JSON
-// (blurry photo, cut-off reply). The raw reply goes to the Netlify function log for debugging.
-function pickJSON(text) {
-  const t = String(text || "").replace(/```(?:json)?/gi, "");
-  const a = t.indexOf("{"), b = t.lastIndexOf("}");
-  if (a < 0 || b <= a) return null;
-  try { return JSON.parse(t.slice(a, b + 1)); } catch { return null; }
-}
-async function claude({ model, max_tokens, content, failMsg }) {
+async function claude({ model, max_tokens, content }) {
   const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw Object.assign(new Error("Card reading and scanning is paused. Contact Fred Haas."), { status: 503 });
-  const start = now();
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), Math.max(4000, 24000 - (now() - start)));
-    try {
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST", signal: ac.signal,
-        headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-        body: JSON.stringify({ model, max_tokens, messages: [{ role: "user", content: attempt === 1 ? content : [...content, { type: "text", text: "Reply with the JSON object only. No other text." }] }] }),
-      });
-      const j = await r.json();
-      if (!r.ok) {
-        const m = String(j?.error?.message || "");
-        console.error("Claude error", r.status, m);
-        if (/credit balance|billing/i.test(m) || r.status === 401 || r.status === 403) throw Object.assign(new Error("Card reading and scanning is paused. Contact Fred Haas."), { status: 503 });
-        if (r.status === 404 || /model/i.test(m)) throw Object.assign(new Error("Card reading and scanning is paused. Contact Fred Haas."), { status: 503 });
-        if (r.status === 429 || r.status === 529) throw Object.assign(new Error("Claude is busy right now. Try again in a minute."), { status: 503 });
-        throw Object.assign(new Error("Claude didn't answer. Try again."), { status: 502 });
-      }
-      const text = (j.content || []).filter((x) => x.type === "text").map((x) => x.text).join("");
-      const out = pickJSON(text);
-      if (out) return out;
-      console.error(`Claude reply without JSON (attempt ${attempt}, stop: ${j.stop_reason}):`, text.slice(0, 600));
-      if (now() - start > 14000) break;
-    } catch (e) {
-      if (e.name === "AbortError") throw Object.assign(new Error("That took too long. Try again."), { status: 504 });
-      throw e;
-    } finally { clearTimeout(t); }
-  }
-  throw Object.assign(new Error(failMsg || "Claude didn't return a usable answer. Try again."), { status: 422 });
-}
-// ---------- Call Log app: recent call notes ----------
-// Reads the Call Log / Quote Follow-Up app's shared snapshot (/api/data) with an ownership code
-// from the team-wide REP_ACCESS_CODES list, then keeps a slim index here for 30 minutes.
-const CALLLOG_URL = () => process.env.CALLLOG_URL || "https://aldoramobilequotefollowup.netlify.app/api/data";
-const coKey = (s) => String(s || "").toLowerCase().replace(/\b(inc|llc|co|corp|company|incorporated|ltd|the|dba)\b\.?/g, "").replace(/[^a-z0-9]/g, "");
-const personKey = (s) => String(s || "").toLowerCase().replace(/[^a-z ]/g, " ").trim().split(/\s+/)[0] || "";
-function callDate(c) {
-  const m = String(c.date || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
-  const d = new Date(c.loggedAt || c.createdAt || c.date || 0); return isNaN(d) ? "" : d.toISOString().slice(0, 10);
-}
-let callIdxMem = null;
-async function callIndex() {
-  if (callIdxMem && now() - callIdxMem.builtAt < 30 * 60e3) return callIdxMem;
-  const cached = await getJSON("callidx", null);
-  if (cached && now() - cached.builtAt < 30 * 60e3) return (callIdxMem = cached);
-  const own = Object.entries(codeMap()).find(([, v]) => /^@(view|all|owner|ownership|admin)\b/i.test(String(v)));
-  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 12000);
+  if (!key) throw Object.assign(new Error("Card reading isn't set up yet. Add ANTHROPIC_API_KEY in Netlify."), { status: 503 });
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 24000);
   try {
-    const r = await fetch(CALLLOG_URL(), { signal: ac.signal, headers: own ? { "x-access-code": own[0] } : {} });
-    if (!r.ok) throw new Error("Call Log answered " + r.status);
-    const snap = await r.json();
-    const calls = (Array.isArray(snap.calls) ? snap.calls : []).filter((c) => c && c.customer && String(c.pulse || "").trim());
-    const byEmail = {}, byCust = {};
-    const push = (map, k, c) => { if (!k) return; (map[k] = map[k] || []).push(c); };
-    for (const c of calls) {
-      const slim = { date: callDate(c), rep: String(c.rep || ""), customer: String(c.customer || ""), contact: String(c.contactName || ""), notes: String(c.pulse || "").trim().slice(0, 700), opportunity: String(c.bigCat || c.quotedProduct || ""), quotedJob: String(c.quotedJob || ""), barrier: String(c.barrier || "") };
-      push(byEmail, String(c.contactEmail || "").trim().toLowerCase(), slim);
-      push(byCust, coKey(c.customer), slim);
-    }
-    const trim = (map, n) => { for (const k in map) map[k] = map[k].sort((a, b) => b.date.localeCompare(a.date)).slice(0, n); };
-    trim(byEmail, 3); trim(byCust, 6);
-    callIdxMem = { builtAt: now(), count: calls.length, byEmail, byCust };
-    await store().setJSON("callidx", callIdxMem);
-    return callIdxMem;
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", signal: ac.signal,
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model, max_tokens, messages: [{ role: "user", content }] }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw Object.assign(new Error(j?.error?.message || "Claude request failed."), { status: 502 });
+    const text = (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) throw Object.assign(new Error("Couldn't read a result. Try again."), { status: 502 });
+    return JSON.parse(m[0]);
   } catch (e) {
-    console.error("Call Log fetch failed:", e.message);
-    if (cached) return (callIdxMem = cached);
-    return { builtAt: 0, count: 0, byEmail: {}, byCust: {} };
+    if (e.name === "AbortError") throw Object.assign(new Error("That took too long. Try again."), { status: 504 });
+    throw e;
   } finally { clearTimeout(t); }
 }
-// Most recent calls for one contact: their own calls first, then calls at that customer.
-// Reps only get calls they logged themselves.
-async function recentCalls(c, user) {
-  const idx = await callIndex();
-  const rk = (s) => String(s || "").toLowerCase().replace(/[^a-z]/g, "").replace(/(.)\1/g, "$1");
-  const mine = (x) => user.role !== "rep" || rk(x.rep) === rk(user.name);
-  const email = String(c.email || "").trim().toLowerCase();
-  const first = personKey(c.first || "");
-  let list = email ? (idx.byEmail[email] || []) : [];
-  const atCo = idx.byCust[coKey(c.company)] || [];
-  if (!list.length && first) list = atCo.filter((x) => personKey(x.contact) === first);
-  const direct = list.filter(mine);
-  const seen = new Set(direct.map((x) => x.date + x.notes.slice(0, 40)));
-  const company = atCo.filter(mine).filter((x) => !seen.has(x.date + x.notes.slice(0, 40)));
-  return { calls: direct.slice(0, 3).map((x) => ({ ...x, match: "contact" })), companyCalls: company.slice(0, 3).map((x) => ({ ...x, match: "company" })), source: idx.count ? "calllog" : "unavailable" };
-}
-
 const CATS = ["Commercial Glazier", "Glazier / Glass Shop", "Mom-Pop Shop", "Shower Door Company", "Specialty Company", "Dealer / Distributor", "Franchised Glass Company", "General Contractor / Builder", "Architect / Designer", "Insulation Company", "Other"];
 
 // ---------- routes ----------
@@ -308,7 +232,7 @@ export default async (req) => {
         await new Promise((r) => setTimeout(r, 700)); return err(401, "That code didn't work. Check it with your manager.");
       }
       const [slug, u] = hit;
-      const user = { role: u.role, name: u.name, slug, branch: u.branch || "" };
+      const user = { role: u.role, name: u.name, slug, branch: branchOf(u) };
       return json(200, { token: sign({ ...user, ver: u.ver, exp: now() + TOKEN_DAYS * 864e5 }), user });
     }
 
@@ -327,7 +251,7 @@ export default async (req) => {
       const list = [];
       for (const s of slugs) for (const [id, c] of Object.entries(shards[s])) if (canSee(user, s, c)) list.push({ id, shard: s, ...c });
       let reps = [];
-      if (user.role !== "rep") { const { users } = await getUsers(); reps = Object.entries(users).filter(([, u]) => u.role === "rep").map(([slug, u]) => ({ slug, name: u.name, branch: u.branch || "" })).sort((a, b) => a.name.localeCompare(b.name)); }
+      if (user.role !== "rep") { const { users } = await getUsers(); reps = Object.entries(users).filter(([, u]) => u.role === "rep").map(([slug, u]) => ({ slug, name: u.name, branch: branchOf(u) })).sort((a, b) => a.name.localeCompare(b.name)); }
       return json(200, { contacts: list, reps });
     }
 
@@ -344,7 +268,7 @@ export default async (req) => {
       }
       const id = "c-" + rid(6);
       const hasPhoto = await savePhoto(shard, id, body.contact?.photo);
-      const rec = { ...c, rep, branch, hasPhoto, thumb: hasPhoto ? cleanThumb(body.contact?.thumb) : "", status: "", created: now(), updated: now(), createdBy: user.name, editedFields: [] };
+      const rec = { ...c, rep, branch, hasPhoto, status: "", created: now(), updated: now(), createdBy: user.name, editedFields: [] };
       await mutate("shard/" + shard, { contacts: {} }, (d) => { d.contacts[id] = rec; });
       await writeLog({ by: user.name, role: user.role, action: "added", id, shard, contact: [c.first, c.last].filter(Boolean).join(" ") || c.company, company: c.company, branch, rep });
       return json(200, { contact: { id, shard, ...rec } });
@@ -366,7 +290,6 @@ export default async (req) => {
           const next = { ...cur };
           for (const k of EDITABLE) if (patch[k] !== undefined) next[k] = String(patch[k]).trim().slice(0, 2000);
           for (const k of LISTS) if (patch[k] !== undefined) next[k] = cleanList(k, patch[k]);
-          if (patch.thumb !== undefined) next.thumb = cleanThumb(patch.thumb);
           if (isAdmin) for (const k of ADMIN_ONLY) if (patch[k] !== undefined) next[k] = k === "rep" ? canonRep(patch[k]) : String(patch[k]).trim();
           changes = diff(cur, next, [...EDITABLE, ...LISTS, ...ADMIN_ONLY]);
           next.editedFields = [...new Set([...(cur.editedFields || []), ...Object.keys(changes).filter((k) => !ADMIN_ONLY.includes(k))])];
@@ -400,10 +323,6 @@ export default async (req) => {
         return json(200, { contact: { id, shard, ...out } });
       }
 
-      if (method === "GET" && action === "calls") {
-        return json(200, await recentCalls(found.contact, user));
-      }
-
       if (method === "GET" && action === "photo") {
         const p = await store().get(`photo/${shard}/${id}`);
         return p ? json(200, { photo: p }) : err(404, "No photo.");
@@ -426,8 +345,7 @@ export default async (req) => {
       const m = img.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
       if (!m || img.length > 3_000_000) return err(400, "Send a JPEG or PNG photo.");
       const out = await claude({
-        model: process.env.CLAUDE_SCAN_MODEL || "claude-haiku-5-5", max_tokens: 1000,
-        failMsg: "Couldn't read that card. Retake the photo flat, in good light, with the card filling the frame.",
+        model: process.env.CLAUDE_SCAN_MODEL || "claude-haiku-5-5", max_tokens: 600,
         content: [
           { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } },
           { type: "text", text: `This photo is a business card handed to a commercial glass and aluminum (storefront, entrances, curtain wall) salesperson. Read it and return ONLY a JSON object with these string keys: first, last, title, company, email, mobile, office, website, address, city, state, zip, category.
@@ -440,30 +358,15 @@ Rules: copy text exactly as printed. If a phone is marked cell, mobile, M or C p
     // ---- Claude: draft a follow-up ----
     if (parts[0] === "draft" && method === "POST") {
       const c = body.contact || {};
-      let rc = { calls: [], companyCalls: [] };
-      try { rc = await recentCalls(c, user); } catch {}
-      const lastCalls = [...rc.calls, ...rc.companyCalls].slice(0, 3).map((x) => ({ date: x.date, rep: x.rep, spokeWith: x.contact, notes: x.notes, opportunity: x.opportunity, quotedJob: x.quotedJob, barrier: x.barrier }));
       const sf = c.sfStatus === "GAP" ? "has storefront opportunity but no storefront quotes with us" : c.sfStatus === "ADD" ? "we are quoting them storefront" : c.sfStatus === "Aligned" ? "active storefront quoting" : "";
       const sender = isAdmin ? "Fred Haas, Corporate Commercial Metal Manager" : `${user.name}, Aldora sales`;
-      const signName = isAdmin ? "Fred Haas" : user.name;
       const out = await claude({
-        model: process.env.CLAUDE_DRAFT_MODEL || "claude-sonnet-5-5", max_tokens: 1200,
-        failMsg: "Couldn't write the draft this time. Tap Draft follow-up again.",
-        content: [{ type: "text", text: `Write the opening of a short follow-up email from ${sender} at Aldora Aluminum & Glass Products (commercial storefront, entrances, aluminum framing and glass; fabrication branches across the South and Mid-Atlantic) to this contact.
-Contact: ${JSON.stringify({ name: [c.first, c.last].filter(Boolean).join(" "), title: c.title, company: c.company, accountType: c.category, branch: c.branch, aldoraRep: isAdmin ? c.rep : "", products: c.products, storefrontStatus: sf, lastCallDate: c.lastCall || "", lastCallNotes: String(c.lastNote || "").slice(0, 1500), recentCallsFromCallLog: lastCalls, met: c.met && !String(c.met).startsWith("Call log") ? c.met : "", notes: c.notes })}
-Write a greeting line with their first name, then one or two short paragraphs, 40 to 90 words total. A fixed closing paragraph about open quotes, a thank-you line and the signature are added after your text automatically, so do NOT write any closing, thanks, sign-off, signature or mention of open quotes.
-Style: plain, direct, short sentences. No em dashes. No filler words like leverage, synergy, robust, seamless. If recent calls from the call log or last call notes are given, the most recent one comes first: pick up where that call left off and follow through on what was discussed, the opportunity, and any quoted job. Otherwise reference where they met or the notes if given. Never mention a barrier, a competitor, or an internal note word for word. Never invent details that aren't in the notes. If they have a storefront gap, invite them to send their next storefront or entrance takeoff for pricing. If an Aldora rep is named, say that rep stays their day-to-day contact.
+        model: process.env.CLAUDE_DRAFT_MODEL || "claude-sonnet-5-5", max_tokens: 700,
+        content: [{ type: "text", text: `Write a short follow-up email from ${sender} at Aldora Aluminum & Glass Products (commercial storefront, entrances, aluminum framing and glass; fabrication branches across the South and Mid-Atlantic) to this contact.
+Contact: ${JSON.stringify({ name: [c.first, c.last].filter(Boolean).join(" "), title: c.title, company: c.company, accountType: c.category, branch: c.branch, aldoraRep: isAdmin ? c.rep : "", products: c.products, storefrontStatus: sf, met: c.met && !String(c.met).startsWith("Call log") ? c.met : "", notes: c.notes })}
+Style: plain, direct, short sentences. 60 to 110 words. No em dashes. No filler words like leverage, synergy, robust, seamless. Reference where they met or the notes if given. If they have a storefront gap, invite them to send their next storefront or entrance takeoff for pricing. If an Aldora rep is named, say that rep stays their day-to-day contact. End with one concrete next step. Sign off with the sender's name, then "Aldora Aluminum & Glass Products".
 Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       });
-      // Fixed closing. The paragraphs above stay generated from the call notes.
-      const n = +c.openQuotes || 0, usd = +c.openQuoteUsd || 0;
-      const total = usd >= 1000 ? Math.round(usd / 100) * 100 : Math.round(usd);
-      const closing = [
-        n > 0 ? `You also have ${n} open quote${n === 1 ? "" : "s"} with us, about $${total.toLocaleString("en-US")} total. Can I send you the list so you can tell me if there’s still an opportunity on any of them, or if we can close them out in our system? Your feedback helps keep us competitive in the market and is greatly appreciated. If I can re-quote anything for you, just let me know and I’ll get it submitted as soon as possible.` : "",
-        "Thanks again for your time. I hope to speak with you again soon.",
-        `${signName}\nAldora Aluminum & Glass Products`,
-      ].filter(Boolean);
-      out.body = [String(out.body || "").trim(), ...closing].join("\n\n");
       return json(200, out);
     }
 
@@ -476,27 +379,6 @@ Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       const keys = blobs.map((b) => b.key).filter((k) => k.slice(4, 18) >= since).sort().reverse().slice(0, 1500);
       const entries = (await Promise.all(keys.map((k) => getJSON(k, null)))).filter(Boolean);
       return json(200, { changes: user.role === "branch" && user.branch !== "*" ? entries.filter((e) => e.branch === user.branch || canonBranch(e.branch) === canonBranch(user.branch)) : entries });
-    }
-
-    // ---- personal groups (every signed-in person keeps their own) ----
-    // groups/<slug>: {myEmail, groups: {id: {name, members: [contactId], created, updated}}}
-    // Groups hold contact ids only. Contact details still come from /contacts, so a group
-    // can never show someone a contact they aren't allowed to see.
-    if (parts[0] === "groups") {
-      const key = "groups/" + slugify(user.slug || user.name);
-      if (method === "GET") return json(200, await getJSON(key, { myEmail: "", groups: {} }));
-      if (method === "PUT") {
-        const t = (x, n) => String(x ?? "").trim().slice(0, n);
-        const out = { myEmail: t(body.myEmail, 200), groups: {} };
-        for (const [id, g] of Object.entries(body.groups || {}).slice(0, 200)) {
-          if (!/^[a-z0-9-]{1,40}$/i.test(id) || !g) continue;
-          const name = t(g.name, 60); if (!name) continue;
-          out.groups[id] = { name, members: [...new Set((Array.isArray(g.members) ? g.members : []).map((m) => t(m, 60)).filter(Boolean))].slice(0, 5000), created: +g.created || now(), updated: now() };
-        }
-        await store().setJSON(key, out);
-        return json(200, out);
-      }
-      return err(405, "Not allowed.");
     }
 
     // ---------- admin only below ----------
@@ -537,7 +419,7 @@ Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       const keyOf = (c) => (c.email ? c.email.toLowerCase() : ((c.company || "") + "|" + (c.first || "") + " " + (c.last || "")).toLowerCase());
       const index = {};
       for (const [s, cs] of Object.entries(shards)) for (const [id, c] of Object.entries(cs)) index[keyOf(c)] = { s, id };
-      const LOG_FIELDS = ["products", "topGroup", "sfStatus", "lastCall", "lastNote", "calls", "openQuotes", "openQuoteUsd", "sfQuoteUsd"];
+      const LOG_FIELDS = ["products", "topGroup", "sfStatus", "lastCall", "calls", "openQuotes", "openQuoteUsd", "sfQuoteUsd"];
       const SOFT = ["first", "last", "company", "email", "office", "mobile", "category"];
       const dirty = new Set(); let added = 0, updated = 0, movedN = 0; const moves = []; const repBranches = {};
       for (const raw of incoming) {
