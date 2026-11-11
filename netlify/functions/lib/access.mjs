@@ -12,10 +12,10 @@
 
 // Field reps and their branch (same list the hub and Call Log app use)
 export const REP_BRANCH = {
-  "Steve Crum": "Louisville", "Jim Wanamaker": "Louisville", "Christian Kelley": "Louisville",
+  "Steve Crum": "Louisville", "Jim Wanamaker": "Louisville", "Christian Kelley": "Louisville", "Kyle Pitsenberger": "Louisville",
   "Clarke Haas": "Charleston", "Zachary Mangum": "Charleston",
   "Andrea Harmon": "Atlanta", "Michael Eidson": "Atlanta",
-  "Chad Parrish": "Newport News", "Kyle Pitsenberger": "Newport News", "Anthony Ante": "Newport News",
+  "Chad Parrish": "Newport News", "Anthony Ante": "Newport News",
   "Eric Pegouske": "Orlando", "Troy Patnode": "Orlando",
   "Ben Gless": "Coral Springs", "Shawn Levine": "Coral Springs", "Jordan Freeman": "Coral Springs",
   "Mark Williams": "Miami",
