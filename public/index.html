@@ -160,6 +160,13 @@
 
   <!-- Import -->
   <div class="wrap panel" id="tab-import" hidden>
+    <h2>New contacts from the Call Log app</h2>
+    <p>Anyone a rep logs a call with, by name or email, is added to that rep's Card File automatically every night. Contacts already here are left alone, including ones you moved by hand.</p>
+    <div class="drop">
+      <div id="syncInfo" style="font-size:14px;color:var(--muted)"></div>
+      <div><button class="btn sm primary" id="syncNow" type="button" style="flex:none">Pull new contacts now</button></div>
+      <div class="result" id="syncOut" hidden></div>
+    </div>
     <h2>Call log refresh</h2>
     <p>Upload the Email Distribution Lists workbook (it reads the All Contacts tab). New contacts get added. Rep and branch follow the call log. Anything a rep edited in the field stays as they left it.</p>
     <div class="drop">

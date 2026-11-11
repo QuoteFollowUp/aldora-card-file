@@ -69,6 +69,7 @@ function showTab(t) {
   ["contacts", "groups", "changes", "people", "import"].forEach((x) => ($("tab-" + x).hidden = x !== t));
   if (t !== "contacts") endSelect();
   if (t === "groups") renderGroups();
+  if (t === "import") loadSyncInfo();
   $("filters").hidden = t !== "contacts"; $("bar").hidden = t !== "contacts";
   if (t === "changes") loadChanges(); if (t === "people") loadPeople();
 }
@@ -532,6 +533,21 @@ $("adrGo").onclick = async () => {
   try { const j = await api("import-addresses", { method: "POST", body: { rows } }); $("adrOut").hidden = false; $("adrOut").textContent = `Filled addresses for ${j.filled.toLocaleString()} contacts at ${j.companies.toLocaleString()} customers, from ${j.rows.toLocaleString()} rows.`; loadContacts(); }
   catch (err) { toast(err.message); }
   finally { $("adrGo").disabled = false; }
+};
+
+/* ---------- new contacts from the Call Log app ---------- */
+async function loadSyncInfo() {
+  try { const m = await api("sync-calllog"); $("syncInfo").textContent = m.at ? `Last pulled ${new Date(m.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}: ${m.added} new contact${m.added === 1 ? "" : "s"}.` : "Not pulled yet."; } catch {}
+}
+$("syncNow").onclick = async () => {
+  $("syncNow").disabled = true; $("syncOut").hidden = false; $("syncOut").textContent = "Reading the Call Log app…";
+  try {
+    const j = await api("sync-calllog", { method: "POST", body: {} });
+    const per = Object.entries(j.byRep || {}).sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`).join(", ");
+    $("syncOut").textContent = j.added ? `Added ${j.added} new contact${j.added === 1 ? "" : "s"} from ${j.calls.toLocaleString()} logged calls. ${per}.` : `No new contacts. All ${j.people.toLocaleString()} people in ${j.calls.toLocaleString()} logged calls are already in Card File.`;
+    loadSyncInfo(); if (j.added) loadContacts();
+  } catch (err) { $("syncOut").textContent = "Couldn't reach the Call Log app. " + err.message; }
+  finally { $("syncNow").disabled = false; }
 };
 
 /* ---------- recent calls from the Call Log app ---------- */

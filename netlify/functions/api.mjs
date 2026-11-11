@@ -243,13 +243,8 @@ async function callIndex() {
   if (callIdxMem && now() - callIdxMem.builtAt < 30 * 60e3) return callIdxMem;
   const cached = await getJSON("callidx", null);
   if (cached && now() - cached.builtAt < 30 * 60e3) return (callIdxMem = cached);
-  const own = Object.entries(codeMap()).find(([, v]) => /^@(view|all|owner|ownership|admin)\b/i.test(String(v)));
-  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 12000);
   try {
-    const r = await fetch(CALLLOG_URL(), { signal: ac.signal, headers: own ? { "x-access-code": own[0] } : {} });
-    if (!r.ok) throw new Error("Call Log answered " + r.status);
-    const snap = await r.json();
-    const calls = (Array.isArray(snap.calls) ? snap.calls : []).filter((c) => c && c.customer && String(c.pulse || "").trim());
+    const calls = (await fetchCallLogCalls()).filter((c) => c && c.customer && String(c.pulse || "").trim());
     const byEmail = {}, byCust = {};
     const push = (map, k, c) => { if (!k) return; (map[k] = map[k] || []).push(c); };
     for (const c of calls) {
@@ -266,7 +261,66 @@ async function callIndex() {
     console.error("Call Log fetch failed:", e.message);
     if (cached) return (callIdxMem = cached);
     return { builtAt: 0, count: 0, byEmail: {}, byCust: {} };
+  }
+}
+async function fetchCallLogCalls() {
+  const own = Object.entries(codeMap()).find(([, v]) => /^@(view|all|owner|ownership|admin)\b/i.test(String(v)));
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 15000);
+  try {
+    const r = await fetch(CALLLOG_URL(), { signal: ac.signal, headers: own ? { "x-access-code": own[0] } : {} });
+    if (!r.ok) throw new Error("Call Log answered " + r.status);
+    const snap = await r.json();
+    return Array.isArray(snap.calls) ? snap.calls : [];
   } finally { clearTimeout(t); }
+}
+
+// ---------- add new contacts straight from the Call Log app ----------
+// Every person a rep has logged a call with (name or email) becomes a contact under that rep,
+// unless Card File already has them. Existing contacts are never changed here, so manual
+// reassignments and rep edits stay as they are. Runs nightly and from the Import tab.
+const FORMER_REPS = new Set(["Steve Crum", "Gregg Keller"].map((n) => rosterKey(n)));
+const splitPerson = (n) => { const t = String(n || "").replace(/\s+/g, " ").trim().split(" "); if (t.length < 2) return [t[0] || "", ""]; return [t.slice(0, -1).join(" "), t[t.length - 1]]; };
+export async function syncFromCallLog(by = "Call Log sync") {
+  const calls = await fetchCallLogCalls();
+  const slugs = await listShards(); const shards = await loadShards(slugs);
+  const have = new Set();
+  for (const cs of Object.values(shards)) for (const c of Object.values(cs)) {
+    if (c.email) have.add("e:" + String(c.email).toLowerCase().trim());
+    if (c.company && (c.first || c.last)) have.add("p:" + coKey(c.company) + "|" + personKey(c.first || c.last));
+  }
+  const people = {};
+  for (const c of calls) {
+    if (!c || !c.customer) continue;
+    const email = String(c.contactEmail || "").trim().toLowerCase();
+    const name = String(c.contactName || "").trim();
+    if (!email && !name) continue;
+    if (/^(unknown|n\/?a|none|owner|manager|front desk|receptionist)$/i.test(name) && !email) continue;
+    const key = email ? "e:" + email : "p:" + coKey(c.customer) + "|" + personKey(name);
+    const d = callDate(c);
+    const p = people[key] || (people[key] = { key, calls: 0, last: "", c: null, pkey: "p:" + coKey(c.customer) + "|" + personKey(name) });
+    p.calls++; if (d >= p.last) { p.last = d; p.c = c; }
+    // Fill gaps from older calls (phone, email, account type often logged only once)
+    for (const f of ["contactPhone", "contactEmail", "acctType"]) if (!p[f] && String(c[f] || "").trim()) p[f] = String(c[f]).trim();
+  }
+  let added = 0; const dirty = new Set(); const byRep = {};
+  for (const p of Object.values(people)) {
+    if (have.has(p.key) || (p.pkey.split("|")[1] && have.has(p.pkey))) continue;
+    // Reps no longer on the roster (e.g. former reps) go to Unassigned for a manager to hand out.
+    const c = p.c; const rawRep = canonRep(c.rep); const rep = rawRep && rosterBranch(rawRep) && !FORMER_REPS.has(rosterKey(rawRep)) ? rawRep : ""; const shard = rep ? slugify(rep) : UNASSIGNED;
+    const [first, last] = splitPerson(c.contactName);
+    const id = "cc-" + crypto.createHash("sha1").update(p.key).digest("hex").slice(0, 12);
+    (shards[shard] = shards[shard] || {})[id] = {
+      first, last, title: "", company: String(c.customer).trim(), email: String(c.contactEmail || p.contactEmail || "").trim(), office: String(c.contactPhone || p.contactPhone || "").trim(), mobile: "",
+      category: String(c.acctType || p.acctType || "").trim() || "Unassigned", rep, branch: canonBranch(c.branch) || String(c.branch || ""),
+      lastCall: p.last, calls: p.calls, status: "", imported: true, hasPhoto: false, editedFields: [],
+      met: "Call Log app", notes: "", created: now(), updated: now(), createdBy: by,
+    };
+    have.add(p.key); have.add(p.pkey); dirty.add(shard); added++; byRep[rep || "Unassigned"] = (byRep[rep || "Unassigned"] || 0) + 1;
+  }
+  await Promise.all([...dirty].map((x) => store().setJSON("shard/" + x, { contacts: shards[x] || {} })));
+  if (added) await writeLog({ by, role: "admin", action: "added", contact: `${added} new contacts from the Call Log app`, company: Object.entries(byRep).map(([r, n]) => `${r} ${n}`).join(", "), branch: "", rep: "" });
+  await store().setJSON("meta-calllog-sync", { at: now(), added, calls: calls.length });
+  return { added, calls: calls.length, people: Object.keys(people).length, byRep };
 }
 // Most recent calls for one contact: their own calls first, then calls at that customer.
 // Reps only get calls they logged themselves.
@@ -535,6 +589,10 @@ Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       });
       return json(200, { ok: true, code });
     }
+
+    // ---- pull new contacts from the Call Log app (manager) ----
+    if (parts[0] === "sync-calllog" && method === "POST") return json(200, await syncFromCallLog(user.name));
+    if (parts[0] === "sync-calllog" && method === "GET") return json(200, await getJSON("meta-calllog-sync", { at: 0 }));
 
     // ---- bulk move or delete (manager) ----
     if (parts[0] === "bulk" && method === "POST") {
