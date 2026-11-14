@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Aldora Card File</title>
-<meta name="theme-color" content="#1C5C66">
+<meta name="theme-color" content="#115E67">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Card File">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -14,28 +14,60 @@
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="/app.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800;900&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/app.css?v=hub1">
 </head>
 <body>
 
+<div class="bgphoto" aria-hidden="true"></div>
+
 <!-- Sign in -->
-<section class="login wrap" id="login" hidden>
-  <form class="box" id="loginForm">
-    <h1>Card File</h1>
-    <p>Aldora Aluminum &amp; Glass Products. Enter the access code your manager gave you.</p>
-    <label class="sr" for="code">Access code (your Call Log code works too)</label>
-    <input id="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" required>
-    <button class="btn primary" type="submit" id="loginBtn">Sign in</button>
-    <div class="err" id="loginErr" role="alert"></div>
-  </form>
+<section class="login" id="login" hidden>
+  <div class="login-in">
+    <img class="login-logo" src="/aldora-logo-hub.png" alt="Aldora">
+    <div class="hero">
+      <img class="photo" src="/bg-cardfile.jpg" alt="">
+      <div class="copy">
+        <div class="eyebrow mono">Glass &amp; Metal · Sales Tools</div>
+        <h1 class="display">Card File</h1>
+        <p>Customer contacts with last call, open quote dollars and follow-ups. Filter by branch, rep and product, then email a group.</p>
+      </div>
+      <img class="badge" src="/icon-cardfile.webp" alt="">
+    </div>
+    <form class="gate" id="loginForm">
+      <div class="gate-copy">
+        <strong>Sign in with your access code</strong>
+        <span>The code your manager gave you. Your Call Log code works too. This device remembers it.</span>
+      </div>
+      <div class="gate-row">
+        <label class="sr" for="code">Access code</label>
+        <input id="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" required>
+        <button class="btn primary" type="submit" id="loginBtn">Sign in</button>
+      </div>
+      <div class="err" id="loginErr" role="alert"></div>
+    </form>
+    <a class="hublink" href="https://aldora-sales-hub.netlify.app/">&#8592; Back to the Sales Hub</a>
+  </div>
 </section>
 
 <div id="app" hidden>
+<div class="appbar">
+  <div class="wrap appbar-in">
+    <img class="appicon" src="/icon-cardfile.webp" alt="">
+    <div class="titles">
+      <div class="t1 display">Card File</div>
+      <div class="t2 mono"><span id="count">Loading…</span><span class="dot" aria-hidden="true">·</span><span id="whoami"></span></div>
+    </div>
+    <div class="btns">
+      <button class="btn-ghost" type="button" id="signout">Sign out</button>
+      <a class="btn-solid" href="https://aldora-sales-hub.netlify.app/" aria-label="Back to the Sales Hub"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V21H3z"/><path d="M9 21v-6h6v6"/></svg><span>Sales Hub</span></a>
+    </div>
+  </div>
+</div>
+<div class="stripe"></div>
 <header>
   <div class="wrap">
-    <div class="brand"><h1>Card File</h1><span class="count" id="count">Loading…</span></div>
-    <div class="who-line"><span id="whoami"></span><button type="button" id="signout">Sign out</button></div>
     <div class="tabs" id="tabs" role="tablist" hidden>
       <button type="button" role="tab" data-tab="contacts" aria-selected="true">Contacts</button>
       <button type="button" role="tab" data-tab="groups" aria-selected="false">My groups</button>
@@ -284,16 +316,16 @@
     <div class="dgroups" id="dGroups"></div>
     <dl class="info" id="dInfo"></dl>
     <div id="dAcctWrap" hidden style="display:grid;gap:8px">
-      <div style="font:600 11px var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Account from call log</div>
+      <div class="seclbl mono">Account from call log</div>
       <dl class="info" id="dAcct"></dl>
     </div>
     <div id="dCallsWrap" hidden style="display:grid;gap:8px">
-      <div style="font:600 11px var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Recent calls from the call log</div>
+      <div class="seclbl mono">Recent calls from the call log</div>
       <div id="dCalls" class="calls"></div>
     </div>
     <div id="dCoWrap" style="display:grid;gap:8px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
-        <div style="font:600 11px var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)" id="dCoLbl">Others at this company</div>
+        <div class="seclbl mono" id="dCoLbl">Others at this company</div>
         <button class="textbtn" type="button" id="dAddCo">+ Add contact at this company</button>
       </div>
       <ul class="list" id="dCoList"></ul>
