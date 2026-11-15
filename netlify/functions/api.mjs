@@ -274,6 +274,27 @@ async function fetchCallLogCalls() {
   } finally { clearTimeout(t); }
 }
 
+// ---------- new customers go to the Sales Hub's account lists ----------
+// A contact at a company that is not on the rep's account list is sent to the Sales Hub
+// (/api/account-flags, action "add") with the address and contact, for Fred to approve. Once he does,
+// the company is on the rep's list in every app and on their My Territory map. Companies already on
+// the list are skipped by the hub ({ exists: true }). Uses a company-wide code from REP_ACCESS_CODES.
+const HUB_URL = () => process.env.HUB_URL || "https://aldora-sales-hub.netlify.app";
+async function hubAddAccount({ rep, c, by }) {
+  const own = Object.entries(codeMap()).find(([, v]) => /^@all\b/i.test(String(v)));
+  if (!own) return null;
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 6000);
+  try {
+    const r = await fetch(HUB_URL() + "/api/account-flags", { method: "POST", signal: ac.signal,
+      headers: { "x-hub-code": own[0], "content-type": "application/json" },
+      body: JSON.stringify({ action: "add", rep, account: c.company, by, source: "Card File",
+        contact: [c.first, c.last].filter(Boolean).join(" "), email: c.email || "", phone: c.mobile || c.office || "",
+        street: c.address || "", city: c.city || "", st: c.state || "", zip: c.zip || "" }) });
+    const d = await r.json().catch(() => ({}));
+    return r.ok ? { pending: !!d.pending, exists: !!d.exists } : null;
+  } catch { return null; } finally { clearTimeout(t); }
+}
+
 // ---------- add new contacts straight from the Call Log app ----------
 // Every person a rep has logged a call with (name or email) becomes a contact under that rep,
 // unless Card File already has them. Existing contacts are never changed here, so manual
@@ -407,7 +428,8 @@ export default async (req) => {
       const rec = { ...c, rep, branch, hasPhoto, thumb: hasPhoto ? cleanThumb(body.contact?.thumb) : "", status: "", created: now(), updated: now(), createdBy: user.name, editedFields: [] };
       await mutate("shard/" + shard, { contacts: {} }, (d) => { d.contacts[id] = rec; });
       await writeLog({ by: user.name, role: user.role, action: "added", id, shard, contact: [c.first, c.last].filter(Boolean).join(" ") || c.company, company: c.company, branch, rep });
-      return json(200, { contact: { id, shard, ...rec } });
+      const hub = rep && c.company ? await hubAddAccount({ rep, c, by: user.name }) : null;
+      return json(200, { contact: { id, shard, ...rec }, hub });
     }
 
     if (parts[0] === "contacts" && parts[1]) {

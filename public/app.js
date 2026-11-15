@@ -8,7 +8,7 @@ const $ = (id) => document.getElementById(id);
 let token = null, me = null, cards = [], reps = [], filter = "All", current = null, editing = null, pendingPhoto = null, readJob = 0, loaded = false, shown = PAGE, showLeft = false;
 
 /* ---------- utils ---------- */
-function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => (t.hidden = true), 2600); }
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => (t.hidden = true), msg.length > 60 ? 5000 : 2600); }
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function fullName(c) { return [c.first, c.last].filter(Boolean).join(" ") || c.company || "Unnamed contact"; }
 function today() { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); }
@@ -265,8 +265,10 @@ $("form").addEventListener("submit", async (e) => {
       const { contact } = await api("contacts/" + encodeURIComponent(editing.id), { method: "PUT", body: { shard: editing.shard, patch } });
       upsertLocal(contact); $("edit").hidden = true; toast("Contact updated"); openDetail(contact.id);
     } else {
-      const { contact } = await api("contacts", { method: "POST", body: { contact: { ...data, ...lists, photo: pendingPhoto || "", thumb: pendingPhoto ? pendingThumb || "" : "" } } });
-      upsertLocal(contact); closeSheets(); toast(`${fullName(contact)} filed`);
+      const { contact, hub } = await api("contacts", { method: "POST", body: { contact: { ...data, ...lists, photo: pendingPhoto || "", thumb: pendingPhoto ? pendingThumb || "" : "" } } });
+      upsertLocal(contact); closeSheets();
+      // A company that is not on the rep's account list goes to Fred to add (Sales Hub)
+      toast(hub && hub.pending ? `${fullName(contact)} filed. ${contact.company} sent to Fred to add to your account list.` : `${fullName(contact)} filed`);
     }
   } catch (err) { $("saveBtn").disabled = false; toast(err.message); }
 });
