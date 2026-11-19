@@ -16,7 +16,7 @@ function isDue(c) { return c.followUp && c.followUp <= today() && c.status !== "
 function digits(p) { return String(p || "").replace(/[^\d+]/g, ""); }
 function money(n) { n = +n || 0; return n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + n; }
 function fmtDate(s) { return s ? new Date(s + "T12:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : ""; }
-const normCo = (s) => String(s || "").toLowerCase().replace(/\bisland glass\s*,?\s*ltd\b/g, " island glass limited ").replace(/\b(inc|llc|co|corp|company|incorporated|ltd|the|dba)\b\.?/g, "").replace(/[^a-z0-9]/g, "");
+const normCo = (s) => String(s || "").toLowerCase().replace(/\bisland glass\s*,?\s*ltd\b/g, " island glass limited ").replace(/\briverside glass\s*(?:&|and)?\s*mirror\s*,?\s*llc\b/g, " riverside glass and mirror georgia ").replace(/\b(inc|llc|co|corp|company|incorporated|ltd|the|dba)\b\.?/g, "").replace(/[^a-z0-9]/g, "");
 const fmtPhones = (c) => (c.phones || []).map((p) => `${p.label ? p.label + ": " : ""}${p.number}`).join("; ");
 const oneAddr = (a) => [a.address, [[a.city, a.state].filter(Boolean).join(", "), a.zip].filter(Boolean).join(" ")].filter(Boolean).join("\n");
 const fmtAddrs = (c) => (c.addresses || []).map((a) => `${a.label ? a.label + ": " : ""}${oneAddr(a).replace(/\n/g, ", ")}`).join("; ");
