@@ -249,6 +249,7 @@
   <div class="wrap">
     <div class="sheethead"><h2 id="editTitle">New card</h2><button class="btn sm" id="editCancel" type="button">Cancel</button></div>
     <img class="photo" id="editPhoto" alt="Photo of the business card" hidden>
+    <button class="btn sm" id="cropBtn" type="button" hidden style="margin:6px 0 8px">✂ Crop photo</button>
     <div id="scanExistingRow" hidden style="margin:4px 0 10px">
       <button class="btn" id="scanExisting" type="button" style="width:100%">📷 Take a picture of the card</button>
       <p style="font-size:12.5px;color:var(--muted);margin:6px 2px 0">Fills in only what's missing. Anything already entered stays as it is.</p>
@@ -283,6 +284,20 @@
 </section>
 
 <!-- Detail sheet -->
+<section class="sheet" id="crop" hidden aria-labelledby="cropTitle">
+  <div class="wrap">
+    <div class="sheethead"><h2 id="cropTitle">Crop to the card</h2><span style="display:flex;gap:8px"><button class="btn sm" id="cropReset" type="button">Full photo</button><button class="btn sm" id="cropCancel" type="button">Cancel</button></span></div>
+    <p style="margin:0 0 10px;color:var(--muted);font-size:13px">Drag the corners to the card's edges. Drag inside the box to move it.</p>
+    <div id="cropStage" style="position:relative;touch-action:none;user-select:none;-webkit-user-select:none;line-height:0">
+      <img id="cropImg" alt="Business card photo to crop" style="width:100%;display:block;border-radius:8px">
+      <div id="cropBox" style="position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.5);outline:1px solid rgba(0,0,0,.4);cursor:move">
+        <span data-h="nw" class="ch" style="left:-12px;top:-12px"></span><span data-h="ne" class="ch" style="right:-12px;top:-12px"></span>
+        <span data-h="sw" class="ch" style="left:-12px;bottom:-12px"></span><span data-h="se" class="ch" style="right:-12px;bottom:-12px"></span>
+      </div>
+    </div>
+    <button class="btn primary" id="cropApply" type="button" style="width:100%;margin-top:14px">Use this crop</button>
+  </div>
+</section>
 <section class="sheet" id="share" hidden aria-labelledby="shareTitle">
   <div class="wrap">
     <div class="sheethead"><h2 id="shareTitle">Share contact</h2><button class="btn sm" id="shareClose" type="button">Close</button></div>

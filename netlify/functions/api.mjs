@@ -514,7 +514,7 @@ export default async (req) => {
         content: [
           { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } },
           { type: "text", text: `This photo is a business card handed to a commercial glass and aluminum (storefront, entrances, curtain wall) salesperson. Read it and return ONLY a JSON object with these string keys: first, last, title, company, email, mobile, office, website, address, city, state, zip, category.
-Rules: copy text exactly as printed. If a phone is marked cell, mobile, M or C put it in mobile; office, O, T, P, main or direct goes in office; one unlabeled phone goes in office. Format US phones as (xxx) xxx-xxxx and keep any extension as " x123". state = 2-letter US abbreviation. address = street line only. category = best guess from exactly one of: ${CATS.join(", ")}. Use "" for anything not on the card. No commentary.` },
+Rules: copy text exactly as printed. If a phone is marked cell, mobile, M or C put it in mobile; office, O, T, P, main or direct goes in office; one unlabeled phone goes in office. Format US phones as (xxx) xxx-xxxx and keep any extension as " x123". state = 2-letter US abbreviation. address = street line only. category = best guess from exactly one of: ${CATS.join(", ")}. Use "" for anything not on the card. Also include a key "box": an object {"x": number, "y": number, "w": number, "h": number} giving the card's outer edges in the photo as fractions from 0 to 1 of the photo's width and height, x and y being the top-left corner, so the photo can be cropped to just the card. If the card fills the photo use {"x":0,"y":0,"w":1,"h":1}. No commentary.` },
         ],
       });
       return json(200, { fields: out });

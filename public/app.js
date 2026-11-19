@@ -168,7 +168,7 @@ $("exportBtn").onclick = () => {
 };
 
 /* ---------- photos and scanning ---------- */
-function loadImg(file) { return new Promise((res, rej) => { const u = URL.createObjectURL(file), i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = u; }); }
+function loadImg(file) { return new Promise((res, rej) => { const u = typeof file === "string" ? file : URL.createObjectURL(file), i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = u; }); }
 function scaled(img, max, q) { const s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement("canvas"); c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); return c.toDataURL("image/jpeg", q); }
 function makeThumb(img) { // 168x100 card-shaped crop, about 4 KB
   const W = 168, H = 100, c = document.createElement("canvas"); c.width = W; c.height = H;
@@ -176,7 +176,7 @@ function makeThumb(img) { // 168x100 card-shaped crop, about 4 KB
   const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
   return c.toDataURL("image/jpeg", 0.7);
 }
-let pendingThumb = null;
+let pendingThumb = null, cropSrc = null; // cropSrc: the full photo, so a crop can always be redone
 function smallPhoto(img) { let w = 900, q = 0.62, url; do { url = scaled(img, w, q); w -= 150; q -= 0.08; } while (url.length > 180000 && w > 300); return url; }
 function findMatch(out) {
   const em = (out.email || "").trim().toLowerCase();
@@ -185,6 +185,52 @@ function findMatch(out) {
   if (ln && co) return cards.find((c) => (c.last || "").toLowerCase() === ln && (c.first || "").toLowerCase().startsWith(fn.slice(0, 3)) && (c.company || "").toLowerCase().startsWith(co)) || null;
   return null;
 }
+// Card photo: set it, crop it (automatically from the card reader's box, or by hand)
+function setPhoto(img) { pendingPhoto = smallPhoto(img); pendingThumb = makeThumb(img); $("editPhoto").src = pendingPhoto; $("editPhoto").hidden = false; $("cropBtn").hidden = false; }
+function cropTo(img, b) {
+  const W = img.naturalWidth, H = img.naturalHeight, x = Math.max(0, Math.round(b.x * W)), y = Math.max(0, Math.round(b.y * H));
+  const w = Math.min(W - x, Math.round(b.w * W)), h = Math.min(H - y, Math.round(b.h * H));
+  const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").drawImage(img, x, y, w, h, 0, 0, w, h);
+  return loadImg(c.toDataURL("image/jpeg", 0.92));
+}
+async function autoCrop(img, box) {
+  const b = box && typeof box === "object" ? { x: +box.x, y: +box.y, w: +box.w, h: +box.h } : null;
+  if (!b || ![b.x, b.y, b.w, b.h].every(Number.isFinite) || b.w < 0.15 || b.h < 0.15 || b.w * b.h > 0.92) return; // missing, tiny or already the whole photo
+  const pad = 0.012; b.x = Math.max(0, b.x - pad); b.y = Math.max(0, b.y - pad); b.w = Math.min(1 - b.x, b.w + 2 * pad); b.h = Math.min(1 - b.y, b.h + 2 * pad);
+  try { setPhoto(await cropTo(img, b)); cropBox0 = b; } catch {}
+}
+let cropBox0 = null, cb = null;
+$("cropBtn").onclick = async () => {
+  // Crop from the full photo when we have it; otherwise from the saved photo
+  let src = cropSrc;
+  if (!src) { try { src = await loadImg($("editPhoto").src); cropSrc = src; cropBox0 = null; } catch { toast("That photo can't be cropped."); return; } }
+  $("cropImg").src = src.src; cb = cropBox0 ? { ...cropBox0 } : { x: 0.05, y: 0.05, w: 0.9, h: 0.9 };
+  raise($("crop")); requestAnimationFrame(drawCrop);
+};
+function drawCrop() { const bx = $("cropBox"); bx.style.left = cb.x * 100 + "%"; bx.style.top = cb.y * 100 + "%"; bx.style.width = cb.w * 100 + "%"; bx.style.height = cb.h * 100 + "%"; }
+(() => {
+  const st = $("cropStage"); let drag = null;
+  st.addEventListener("pointerdown", (e) => {
+    const h = e.target.dataset && e.target.dataset.h, inBox = e.target.closest("#cropBox"); if (!h && !inBox) return;
+    e.preventDefault(); st.setPointerCapture(e.pointerId); const r = st.getBoundingClientRect();
+    drag = { h: h || "move", sx: e.clientX, sy: e.clientY, b: { ...cb }, rw: r.width, rh: r.height };
+  });
+  st.addEventListener("pointermove", (e) => {
+    if (!drag) return; const dx = (e.clientX - drag.sx) / drag.rw, dy = (e.clientY - drag.sy) / drag.rh, b = { ...drag.b }, MIN = 0.08;
+    if (drag.h === "move") { b.x = Math.min(Math.max(0, b.x + dx), 1 - b.w); b.y = Math.min(Math.max(0, b.y + dy), 1 - b.h); }
+    else {
+      if (drag.h.includes("w")) { const nx = Math.min(Math.max(0, b.x + dx), b.x + b.w - MIN); b.w += b.x - nx; b.x = nx; }
+      if (drag.h.includes("e")) b.w = Math.min(Math.max(MIN, b.w + dx), 1 - b.x);
+      if (drag.h.includes("n")) { const ny = Math.min(Math.max(0, b.y + dy), b.y + b.h - MIN); b.h += b.y - ny; b.y = ny; }
+      if (drag.h.includes("s")) b.h = Math.min(Math.max(MIN, b.h + dy), 1 - b.y);
+    }
+    cb = b; drawCrop();
+  });
+  const end = () => (drag = null); st.addEventListener("pointerup", end); st.addEventListener("pointercancel", end);
+})();
+$("cropReset").onclick = () => { cb = { x: 0, y: 0, w: 1, h: 1 }; drawCrop(); };
+$("cropCancel").onclick = () => closeSheet("crop");
+$("cropApply").onclick = async () => { try { setPhoto(await cropTo(cropSrc, cb)); cropBox0 = { ...cb }; closeSheet("crop"); toast("Photo cropped. Save to keep it."); } catch { toast("Couldn't crop that photo."); } };
 function showRead(text, busy) { $("readStatus").hidden = false; $("readText").textContent = text; $("readStatus").querySelector(".spin").hidden = !busy; }
 // Take a picture of the card for a contact already on file: fill only what's missing, keep everything entered
 $("scanExisting").onclick = () => $("camEdit").click();
@@ -192,11 +238,12 @@ $("camEdit").addEventListener("change", async (e) => {
   const file = e.target.files[0]; e.target.value = ""; if (!file) return;
   let img; try { img = await loadImg(file); } catch { showRead("That photo couldn't be opened. Try again.", false); return; }
   const hadPhoto = !!(editing && editing.hasPhoto);
-  if (!hadPhoto) { pendingPhoto = smallPhoto(img); pendingThumb = makeThumb(img); $("editPhoto").src = pendingPhoto; $("editPhoto").hidden = false; }
+  if (!hadPhoto) { cropSrc = img; setPhoto(img); }
   const job = ++readJob; showRead("Reading the card…", true);
   try {
     const { fields: out } = await api("scan", { method: "POST", body: { image: scaled(img, 1400, 0.82) } });
     if (job !== readJob) return;
+    if (!hadPhoto) await autoCrop(img, out && out.box);
     const added = [];
     const names = { first: "first name", last: "last name", title: "title", company: "company", email: "email", mobile: "mobile", office: "office phone", website: "website", address: "address", city: "city", state: "state", zip: "zip" };
     for (const k of Object.keys(names)) { const el = $(fid(k)), v = out && out[k] ? String(out[k]).trim() : ""; if (v && !el.value.trim()) { el.value = v; added.push(names[k]); } }
@@ -211,11 +258,12 @@ $("cam").addEventListener("change", async (e) => {
   const file = e.target.files[0]; e.target.value = ""; if (!file) return;
   openEdit(null);
   let img; try { img = await loadImg(file); } catch { showRead("That photo couldn't be opened. Try again, or type the card in.", false); return; }
-  pendingPhoto = smallPhoto(img); pendingThumb = makeThumb(img); $("editPhoto").src = pendingPhoto; $("editPhoto").hidden = false;
+  cropSrc = img; setPhoto(img);
   const job = ++readJob; showRead("Reading the card…", true);
   try {
     const { fields: out } = await api("scan", { method: "POST", body: { image: scaled(img, 1400, 0.82) } });
     if (job !== readJob) return;
+    await autoCrop(img, out && out.box);
     const match = out && findMatch(out);
     if (match) { editing = match; $("editTitle").textContent = "Update existing contact"; FIELDS.forEach((k) => ($(fid(k)).value = match[k] || "")); }
     let n = 0;
@@ -260,13 +308,14 @@ function openEdit(c, preset) {
   $("f_branch").disabled = me.role === "branch";
   $("editPhoto").hidden = true; $("readStatus").hidden = true; $("saveBtn").disabled = false;
   $("scanExistingRow").hidden = !c;
-  if (c && c.hasPhoto) loadPhoto(c, $("editPhoto"));
+  cropSrc = null; cropBox0 = null; $("cropBtn").hidden = true;
+  if (c && c.hasPhoto) { loadPhoto(c, $("editPhoto")); $("cropBtn").hidden = false; }
   raise($("edit"));
 }
 let zTop = 30;
 function raise(el) { el.style.zIndex = ++zTop; el.hidden = false; el.scrollTop = 0; document.body.style.overflow = "hidden"; }
-function closeSheet(id) { $(id).hidden = true; if (["edit", "detail", "gpick", "gview", "rpick", "share"].every((x) => $(x).hidden)) document.body.style.overflow = ""; }
-function closeSheets() { ["edit", "detail", "gpick", "gview", "rpick", "share"].forEach((x) => ($(x).hidden = true)); document.body.style.overflow = ""; }
+function closeSheet(id) { $(id).hidden = true; if (["edit", "detail", "gpick", "gview", "rpick", "share", "crop"].every((x) => $(x).hidden)) document.body.style.overflow = ""; }
+function closeSheets() { ["edit", "detail", "gpick", "gview", "rpick", "share", "crop"].forEach((x) => ($(x).hidden = true)); document.body.style.overflow = ""; }
 $("editCancel").onclick = () => { readJob++; if (!$("detail").hidden) $("edit").hidden = true; else closeSheets(); };
 $("manual").onclick = () => openEdit(null);
 $("form").addEventListener("submit", async (e) => {
