@@ -255,6 +255,11 @@
       <p style="font-size:12.5px;color:var(--muted);margin:6px 2px 0">Fills in only what's missing. Anything already entered stays as it is.</p>
       <input id="camEdit" type="file" accept="image/*" capture="environment" class="sr">
     </div>
+    <div style="margin:4px 0 10px">
+      <button class="btn" id="scanBack" type="button" style="width:100%">📷 Scan the back of the card</button>
+      <input id="camBack" type="file" accept="image/*" capture="environment" class="sr">
+      <img class="photo" id="editBack" alt="Back of the business card" hidden style="margin-top:8px">
+    </div>
     <div class="status" id="readStatus" hidden><span class="spin"></span><span id="readText">Reading the card…</span></div>
     <form class="fields" id="form" autocomplete="off">
       <div class="f"><label for="f_first">First name</label><input id="f_first"></div>
@@ -327,6 +332,7 @@
       <div class="actions"><button class="btn sm danger" id="delYes" type="button">Delete contact</button><button class="btn sm" id="delNo" type="button">Keep it</button></div>
     </div>
     <img class="photo cardphoto" id="dPhoto" alt="Photo of the business card" hidden>
+    <img class="photo cardphoto" id="dPhotoBack" alt="Back of the business card" hidden style="margin-top:8px">
     <div class="ident">
       <h3 id="dName"></h3>
       <div class="t" id="dTitle"></div>

@@ -4,6 +4,7 @@
 //   users              {users: {slug: {name, role, branch, active, codeHash, ver, created}}}
 //   shard/<repSlug>    {contacts: {id: contact}}   one shard per rep, plus shard/_unassigned
 //   photo/<shard>/<id> card photo as a data URL
+//   photoback/<shard>/<id> back of the card, same format
 //   log/<ms>-<rand>    one change-log entry
 //   meta               {lastImport, ...}
 //
@@ -166,15 +167,17 @@ function canSee(user, shard, contact) {
 }
 
 // ---------- contact helpers ----------
-function clean(c) { const o = { ...c }; delete o.photo; return o; }
+function clean(c) { const o = { ...c }; delete o.photo; delete o.photoBack; return o; }
 const fmtList = (k, v) => (v || []).map((x) => k === "phones" ? `${x.label ? x.label + ": " : ""}${x.number}` : `${x.label ? x.label + ": " : ""}${[x.address, x.city, x.state, x.zip].filter(Boolean).join(", ")}`).join("; ");
 function diff(a, b, keys) { const d = {}; for (const k of keys) { if (LISTS.includes(k)) { const x = fmtList(k, a[k]), y = fmtList(k, b[k]); if (x !== y) d[k] = [x, y]; continue; } const x = a[k] ?? "", y = b[k] ?? ""; if (String(x) !== String(y)) d[k] = [x, y]; } return d; }
 // Small card thumbnail kept on the contact itself so the list can show it without loading photos.
 const cleanThumb = (v) => (typeof v === "string" && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(v) && v.length <= 24000 ? v : "");
-async function savePhoto(shard, id, dataUrl) {
+// Move or delete both card photos (front and back)
+async function movePhotos(from, to, id) { for (const k of ["photo", "photoback"]) { const p = await store().get(`${k}/${from}/${id}`); if (p && to) await store().set(`${k}/${to}/${id}`, p); if (p) await store().delete(`${k}/${from}/${id}`); } }
+async function savePhoto(shard, id, dataUrl, key = "photo") {
   if (!dataUrl) return false;
   if (!/^data:image\/(jpeg|png|webp);base64,/.test(dataUrl) || dataUrl.length > 600000) throw new Error("Photo format not accepted.");
-  await store().set(`photo/${shard}/${id}`, dataUrl);
+  await store().set(`${key}/${shard}/${id}`, dataUrl);
   return true;
 }
 async function findContact(user, id, shardHint) {
@@ -425,7 +428,8 @@ export default async (req) => {
       }
       const id = "c-" + rid(6);
       const hasPhoto = await savePhoto(shard, id, body.contact?.photo);
-      const rec = { ...c, rep, branch, hasPhoto, thumb: hasPhoto ? cleanThumb(body.contact?.thumb) : "", status: "", created: now(), updated: now(), createdBy: user.name, editedFields: [] };
+      const hasBack = await savePhoto(shard, id, body.contact?.photoBack, "photoback");
+      const rec = { ...c, rep, branch, hasPhoto, hasBack, thumb: hasPhoto ? cleanThumb(body.contact?.thumb) : "", status: "", created: now(), updated: now(), createdBy: user.name, editedFields: [] };
       await mutate("shard/" + shard, { contacts: {} }, (d) => { d.contacts[id] = rec; });
       await writeLog({ by: user.name, role: user.role, action: "added", id, shard, contact: [c.first, c.last].filter(Boolean).join(" ") || c.company, company: c.company, branch, rep });
       const hub = rep && c.company ? await hubAddAccount({ rep, c, by: user.name }) : null;
@@ -442,7 +446,7 @@ export default async (req) => {
         const patch = body.patch || {};
         let out, moved = null, changes = {};
         const target = isAdmin && patch.rep !== undefined ? (canonRep(patch.rep) ? slugify(canonRep(patch.rep)) : UNASSIGNED) : shard;
-        const photo = patch.photo;
+        const photo = patch.photo, photoBack = patch.photoBack;
         await mutate("shard/" + shard, { contacts: {} }, (d) => {
           const cur = d.contacts[id]; if (!cur) throw Object.assign(new Error("Contact not found."), { status: 404 });
           const next = { ...cur };
@@ -467,6 +471,14 @@ export default async (req) => {
         } else if (moved && out.hasPhoto) {
           const p = await store().get(`photo/${shard}/${id}`); if (p) { await store().set(`photo/${moved}/${id}`, p); await store().delete(`photo/${shard}/${id}`); }
         }
+        if (photoBack) {
+          if (moved) await store().delete(`photoback/${shard}/${id}`);
+          out.hasBack = await savePhoto(finalShard, id, photoBack, "photoback");
+          await mutate("shard/" + finalShard, { contacts: {} }, (d) => { if (d.contacts[id]) d.contacts[id].hasBack = true; });
+          changes.photoBack = ["", "back of card added"];
+        } else if (moved && out.hasBack) {
+          const p = await store().get(`photoback/${shard}/${id}`); if (p) { await store().set(`photoback/${moved}/${id}`, p); await store().delete(`photoback/${shard}/${id}`); }
+        }
         if (Object.keys(changes).length) await writeLog({ by: user.name, role: user.role, action: moved ? "reassigned" : "updated", id, shard: finalShard, contact: [out.first, out.last].filter(Boolean).join(" ") || out.company, company: out.company, branch: out.branch, rep: out.rep, changes });
         return json(200, { contact: { id, shard: finalShard, ...out } });
       }
@@ -487,6 +499,11 @@ export default async (req) => {
         return json(200, await recentCalls(found.contact, user));
       }
 
+      if (method === "GET" && action === "photoback") {
+        const p = await store().get(`photoback/${shard}/${id}`);
+        return p ? json(200, { photo: p }) : err(404, "No photo.");
+      }
+
       if (method === "GET" && action === "photo") {
         const p = await store().get(`photo/${shard}/${id}`);
         return p ? json(200, { photo: p }) : err(404, "No photo.");
@@ -496,7 +513,7 @@ export default async (req) => {
         if (!isAdmin) return err(403, "Only the manager can delete contacts. Use Left company instead.");
         const c = found.contact;
         await mutate("shard/" + shard, { contacts: {} }, (d) => { delete d.contacts[id]; });
-        await store().delete(`photo/${shard}/${id}`);
+        await store().delete(`photo/${shard}/${id}`); await store().delete(`photoback/${shard}/${id}`);
         await writeLog({ by: user.name, role: user.role, action: "deleted", id, shard, contact: [c.first, c.last].filter(Boolean).join(" ") || c.company, company: c.company, branch: c.branch, rep: c.rep });
         return json(200, { ok: true });
       }
@@ -508,6 +525,17 @@ export default async (req) => {
       const img = String(body.image || "");
       const m = img.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
       if (!m || img.length > 3_000_000) return err(400, "Send a JPEG or PNG photo.");
+      if (body.side === "back") {
+        const back = await claude({
+          model: process.env.CLAUDE_SCAN_MODEL || "claude-haiku-5-5", max_tokens: 1000,
+          failMsg: "Couldn't read the back of that card. Retake the photo flat, in good light.",
+          content: [
+            { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } },
+            { type: "text", text: `This photo is the BACK of a business card handed to a commercial glass and aluminum salesperson. Return ONLY a JSON object with these string keys: first, last, title, company, email, mobile, office, website, address, city, state, zip, notes. Fill a contact key only if that item is printed or written on this side. Phones as (xxx) xxx-xxxx. notes = everything else on the back worth keeping, copied exactly, on separate lines: handwritten notes, other locations or branches, extra phone or fax numbers, license or certification numbers, services or product lines, hours, appointment dates. Leave notes "" if the back is blank or only a logo, slogan or design. Also include "box": {"x","y","w","h"} giving the card's outer edges as fractions 0 to 1 of the photo (x,y top-left). No commentary.` },
+          ],
+        });
+        return json(200, { fields: back });
+      }
       const out = await claude({
         model: process.env.CLAUDE_SCAN_MODEL || "claude-haiku-5-5", max_tokens: 1000,
         failMsg: "Couldn't read that card. Retake the photo flat, in good light, with the card filling the frame.",
@@ -632,14 +660,12 @@ Return ONLY JSON: {"subject": "...", "body": "..."}` }],
         delete shards[shard][id]; dirty.add(shard); done++;
         if (act === "move") {
           (shards[target] = shards[target] || {})[id] = { ...c, rep, repLocked: true, updated: now(), updatedBy: user.name };
-          dirty.add(target); if (c.hasPhoto && shard !== target) moved.push({ id, from: shard });
-        } else if (c.hasPhoto) moved.push({ id, from: shard, del: true });
+          dirty.add(target); if ((c.hasPhoto || c.hasBack) && shard !== target) moved.push({ id, from: shard });
+        } else if (c.hasPhoto || c.hasBack) moved.push({ id, from: shard, del: true });
       }
       await Promise.all([...dirty].map((s) => store().setJSON("shard/" + s, { contacts: shards[s] || {} })));
       for (const m of moved) {
-        const p = await store().get(`photo/${m.from}/${m.id}`);
-        if (p && !m.del) await store().set(`photo/${target}/${m.id}`, p);
-        await store().delete(`photo/${m.from}/${m.id}`);
+        await movePhotos(m.from, m.del ? null : target, m.id);
       }
       const fromReps = [...new Set(slugs)].join(", ");
       await writeLog({ by: user.name, role: "admin", action: act === "move" ? "reassigned" : "deleted", contact: `${done} contacts`, company: "", branch: "", rep: rep || (act === "move" ? "Unassigned" : ""), changes: act === "move" ? { rep: [fromReps, rep || "Unassigned"] } : undefined });
@@ -684,7 +710,7 @@ Return ONLY JSON: {"subject": "...", "body": "..."}` }],
       }
       await Promise.all([...dirty].map((s) => store().setJSON("shard/" + s, { contacts: shards[s] || {} })));
       for (const m of moves) {
-        const p = await store().get(`photo/${m.from}/${m.id}`); if (p) { await store().set(`photo/${m.to}/${m.id}`, p); await store().delete(`photo/${m.from}/${m.id}`); }
+        await movePhotos(m.from, m.to, m.id);
         await writeLog({ by: "Call log import", role: "admin", action: "reassigned", id: m.id, shard: m.to, contact: m.name, company: m.company, branch: m.branch, rep: m.rep, changes: { rep: [m.fromRep || "", m.rep || ""] } });
       }
       let newReps = 0;

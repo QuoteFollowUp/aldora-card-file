@@ -280,3 +280,13 @@ dl.info dd a{color:var(--teal);text-decoration:none;font-weight:500}
 
 #cropStage{overflow:hidden;border-radius:8px}
 #cropBox .ch{position:absolute;width:24px;height:24px;border-radius:50%;background:#fff;border:2px solid var(--teal,#075b65);box-shadow:0 1px 4px rgba(0,0,0,.4)}
+
+/* Fit to screen on phones.
+   iPhone Safari zooms the page in when a field under 16px is tapped and stays zoomed, so reps had to scroll around.
+   16px fields on touch screens stop the zoom. Nothing is allowed to push the page wider than the screen. */
+html,body{max-width:100%;overflow-x:hidden}
+img,video,canvas{max-width:100%}
+@media (pointer:coarse){input,select,textarea{font-size:16px!important}}
+.tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+.tbl{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+.panel,.drop{min-width:0;max-width:100%}.drop>*{min-width:0;max-width:100%}.drop input[type=file]{max-width:100%}
