@@ -231,7 +231,7 @@ async function claude({ model, max_tokens, content, failMsg }) {
 // Reads the Call Log / Quote Follow-Up app's shared snapshot (/api/data) with an ownership code
 // from the team-wide REP_ACCESS_CODES list, then keeps a slim index here for 30 minutes.
 const CALLLOG_URL = () => process.env.CALLLOG_URL || "https://aldoramobilequotefollowup.netlify.app/api/data";
-const coKey = (s) => String(s || "").toLowerCase().replace(/\bisland glass\s*,?\s*ltd\b/g, " island glass limited ").replace(/\briverside glass\s*(?:&|and)?\s*mirror\s*,?\s*llc\b/g, " riverside glass and mirror georgia ").replace(/\b(inc|llc|co|corp|company|incorporated|ltd|the|dba)\b\.?/g, "").replace(/[^a-z0-9]/g, "");
+const coKey = (s) => String(s || "").toLowerCase().replace(/\bisland glass\s*,?\s*ltd\b/g, " island glass limited ").replace(/\briverside glass\s*(?:&|and)?\s*mirror\s*,?\s*llc\b/g, " riverside glass and mirror georgia ").replace(/\bj\s*(?:&|and)?\s*l glass\s*,?\s*llc\b/g, " j and l glass christian ").replace(/\b(inc|llc|co|corp|company|incorporated|ltd|the|dba)\b\.?/g, "").replace(/[^a-z0-9]/g, "");
 const personKey = (s) => String(s || "").toLowerCase().replace(/[^a-z ]/g, " ").trim().split(/\s+/)[0] || "";
 function callDate(c) {
   const m = String(c.date || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -702,7 +702,7 @@ Return ONLY JSON: {"subject": "...", "body": "..."}` }],
     // ---- ERP address import: fill blanks by customer name ----
     if (parts[0] === "import-addresses" && method === "POST") {
       const rows = Array.isArray(body.rows) ? body.rows : [];
-      const norm = (s) => String(s || "").toLowerCase().replace(/\bisland glass\s*,?\s*ltd\b/g, " island glass limited ").replace(/\briverside glass\s*(?:&|and)?\s*mirror\s*,?\s*llc\b/g, " riverside glass and mirror georgia ").replace(/\b(inc|llc|co|corp|company|incorporated|ltd|the|dba)\b\.?/g, "").replace(/[^a-z0-9]/g, "");
+      const norm = (s) => String(s || "").toLowerCase().replace(/\bisland glass\s*,?\s*ltd\b/g, " island glass limited ").replace(/\briverside glass\s*(?:&|and)?\s*mirror\s*,?\s*llc\b/g, " riverside glass and mirror georgia ").replace(/\bj\s*(?:&|and)?\s*l glass\s*,?\s*llc\b/g, " j and l glass christian ").replace(/\b(inc|llc|co|corp|company|incorporated|ltd|the|dba)\b\.?/g, "").replace(/[^a-z0-9]/g, "");
       const map = {}; for (const r of rows) { const k = norm(r.company); if (k && r.address && !map[k]) map[k] = r; }
       const slugs = await listShards(); const shards = await loadShards(slugs);
       let filled = 0, companies = new Set(); const dirty = new Set();
