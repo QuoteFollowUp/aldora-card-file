@@ -249,6 +249,11 @@
   <div class="wrap">
     <div class="sheethead"><h2 id="editTitle">New card</h2><button class="btn sm" id="editCancel" type="button">Cancel</button></div>
     <img class="photo" id="editPhoto" alt="Photo of the business card" hidden>
+    <div id="scanExistingRow" hidden style="margin:4px 0 10px">
+      <button class="btn" id="scanExisting" type="button" style="width:100%">📷 Take a picture of the card</button>
+      <p style="font-size:12.5px;color:var(--muted);margin:6px 2px 0">Fills in only what's missing. Anything already entered stays as it is.</p>
+      <input id="camEdit" type="file" accept="image/*" capture="environment" class="sr">
+    </div>
     <div class="status" id="readStatus" hidden><span class="spin"></span><span id="readText">Reading the card…</span></div>
     <form class="fields" id="form" autocomplete="off">
       <div class="f"><label for="f_first">First name</label><input id="f_first"></div>
@@ -278,6 +283,20 @@
 </section>
 
 <!-- Detail sheet -->
+<section class="sheet" id="share" hidden aria-labelledby="shareTitle">
+  <div class="wrap">
+    <div class="sheethead"><h2 id="shareTitle">Share contact</h2><button class="btn sm" id="shareClose" type="button">Close</button></div>
+    <p id="shareWho" style="margin:0 0 12px;color:var(--muted)"></p>
+    <div style="display:grid;gap:10px">
+      <button class="btn primary" id="shareCard" type="button">📇 Send contact card</button>
+      <p class="hint" style="font-size:12.5px;color:var(--muted);margin:-4px 2px 4px">Opens your phone's share menu with the contact card attached. Pick Messages, Mail or Outlook. Your colleague taps it to save the contact.</p>
+      <button class="btn" id="shareEmail" type="button">✉ Email the details</button>
+      <button class="btn" id="shareText" type="button">💬 Text the details</button>
+      <button class="btn" id="shareVcf" type="button">⬇ Download contact card (.vcf)</button>
+      <button class="btn" id="shareCsv" type="button">⬇ Download as CSV</button>
+    </div>
+  </div>
+</section>
 <section class="sheet" id="detail" hidden aria-labelledby="dName">
   <div class="wrap">
     <div class="sheethead"><button class="btn sm" id="dBack" type="button">Back</button><span style="display:flex;gap:8px"><button class="btn sm" id="dEdit" type="button">Edit</button><button class="btn sm" id="dLeft" type="button">Left company</button><button class="btn sm danger" id="dDel" type="button" hidden>Delete</button></span></div>
@@ -303,6 +322,10 @@
       <a id="qEmail" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1"/><path d="m3 7 9 6 9-6"/></svg>Email</a>
       <a id="qCall" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>Call</a>
       <button id="qDraft" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/></svg>Draft follow-up</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 4px">
+      <button class="btn" id="dScan" type="button" title="Take a picture of the business card. Fills in only what's missing.">📷 Scan card</button>
+      <button class="btn" id="dShare" type="button">↗ Share contact</button>
     </div>
     <div class="draft" id="draft" hidden>
       <div class="status" id="draftStatus" hidden><span class="spin"></span><span>Writing the email…</span></div>

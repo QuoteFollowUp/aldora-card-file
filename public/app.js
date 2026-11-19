@@ -186,6 +186,27 @@ function findMatch(out) {
   return null;
 }
 function showRead(text, busy) { $("readStatus").hidden = false; $("readText").textContent = text; $("readStatus").querySelector(".spin").hidden = !busy; }
+// Take a picture of the card for a contact already on file: fill only what's missing, keep everything entered
+$("scanExisting").onclick = () => $("camEdit").click();
+$("camEdit").addEventListener("change", async (e) => {
+  const file = e.target.files[0]; e.target.value = ""; if (!file) return;
+  let img; try { img = await loadImg(file); } catch { showRead("That photo couldn't be opened. Try again.", false); return; }
+  const hadPhoto = !!(editing && editing.hasPhoto);
+  if (!hadPhoto) { pendingPhoto = smallPhoto(img); pendingThumb = makeThumb(img); $("editPhoto").src = pendingPhoto; $("editPhoto").hidden = false; }
+  const job = ++readJob; showRead("Reading the card…", true);
+  try {
+    const { fields: out } = await api("scan", { method: "POST", body: { image: scaled(img, 1400, 0.82) } });
+    if (job !== readJob) return;
+    const added = [];
+    const names = { first: "first name", last: "last name", title: "title", company: "company", email: "email", mobile: "mobile", office: "office phone", website: "website", address: "address", city: "city", state: "state", zip: "zip" };
+    for (const k of Object.keys(names)) { const el = $(fid(k)), v = out && out[k] ? String(out[k]).trim() : ""; if (v && !el.value.trim()) { el.value = v; added.push(names[k]); } }
+    // A phone on the card that is not anywhere on the contact goes in as an extra phone
+    const have = new Set([$("f_mobile").value, $("f_office").value, ...readPhones().map((p) => p.number)].map(digits).filter(Boolean));
+    for (const [k, label] of [["mobile", "Cell (card)"], ["office", "Office (card)"]]) { const v = out && out[k] ? String(out[k]).trim() : ""; if (v && !have.has(digits(v))) { addPhoneRow({ label, number: v }); have.add(digits(v)); added.push(label.toLowerCase()); } }
+    if (!hadPhoto && pendingPhoto) added.push("card photo");
+    showRead(added.length ? "Added from the card: " + added.join(", ") + ". Nothing you entered was changed. Check and save." : "Everything on the card is already filled in. Nothing changed." + (hadPhoto ? "" : " The photo will be saved."), false);
+  } catch (err) { if (job === readJob) showRead(err.message, false); }
+});
 $("cam").addEventListener("change", async (e) => {
   const file = e.target.files[0]; e.target.value = ""; if (!file) return;
   openEdit(null);
@@ -238,13 +259,14 @@ function openEdit(c, preset) {
   if (preset) for (const k in preset) if (FIELDS.includes(k)) $(fid(k)).value = preset[k] ?? "";
   $("f_branch").disabled = me.role === "branch";
   $("editPhoto").hidden = true; $("readStatus").hidden = true; $("saveBtn").disabled = false;
+  $("scanExistingRow").hidden = !c;
   if (c && c.hasPhoto) loadPhoto(c, $("editPhoto"));
   raise($("edit"));
 }
 let zTop = 30;
 function raise(el) { el.style.zIndex = ++zTop; el.hidden = false; el.scrollTop = 0; document.body.style.overflow = "hidden"; }
-function closeSheet(id) { $(id).hidden = true; if (["edit", "detail", "gpick", "gview", "rpick"].every((x) => $(x).hidden)) document.body.style.overflow = ""; }
-function closeSheets() { ["edit", "detail", "gpick", "gview", "rpick"].forEach((x) => ($(x).hidden = true)); document.body.style.overflow = ""; }
+function closeSheet(id) { $(id).hidden = true; if (["edit", "detail", "gpick", "gview", "rpick", "share"].every((x) => $(x).hidden)) document.body.style.overflow = ""; }
+function closeSheets() { ["edit", "detail", "gpick", "gview", "rpick", "share"].forEach((x) => ($(x).hidden = true)); document.body.style.overflow = ""; }
 $("editCancel").onclick = () => { readJob++; if (!$("detail").hidden) $("edit").hidden = true; else closeSheets(); };
 $("manual").onclick = () => openEdit(null);
 $("form").addEventListener("submit", async (e) => {
@@ -326,6 +348,58 @@ $("dAddCo").onclick = () => {
   $("editTitle").textContent = "New contact at " + c.company; $("detail").hidden = true;
 };
 $("dEdit").onclick = () => openEdit(current);
+$("dScan").onclick = () => { openEdit(current); $("camEdit").click(); };
+
+/* ---------- share a contact ---------- */
+function vcardOf(c) {
+  const e = (v) => String(v || "").replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/([,;])/g, "\\$1");
+  const L = ["BEGIN:VCARD", "VERSION:3.0", `N:${e(c.last)};${e(c.first)};;;`, `FN:${e(personName(c) || c.company || "Contact")}`];
+  if (c.company) L.push(`ORG:${e(c.company)}`);
+  if (c.title) L.push(`TITLE:${e(c.title)}`);
+  if (c.email) L.push(`EMAIL;TYPE=INTERNET,WORK:${c.email}`);
+  if (c.mobile) L.push(`TEL;TYPE=CELL:${c.mobile}`);
+  if (c.office) L.push(`TEL;TYPE=WORK,VOICE:${c.office}`);
+  (c.phones || []).forEach((p) => L.push(`TEL;TYPE=${/fax/i.test(p.label || "") ? "FAX" : "VOICE"}:${p.number}`));
+  if (c.address || c.city) L.push(`ADR;TYPE=WORK:;;${e(c.address)};${e(c.city)};${e(c.state)};${e(c.zip)};USA`);
+  (c.addresses || []).forEach((a) => L.push(`ADR;TYPE=WORK:;;${e(a.address)};${e(a.city)};${e(a.state)};${e(a.zip)};USA`));
+  if (c.website) L.push(`URL:${c.website}`);
+  const note = [c.category, c.branch ? "Aldora " + c.branch : "", c.rep ? "Rep: " + c.rep : ""].filter(Boolean).join(" · ");
+  if (note) L.push(`NOTE:${e(note)}`);
+  L.push("END:VCARD");
+  return L.join("\r\n") + "\r\n";
+}
+function textOf(c) {
+  const addr = [c.address, [c.city, c.state].filter(Boolean).join(", ") + (c.zip ? " " + c.zip : "")].filter((x) => x && x.trim()).join("\n");
+  return [personName(c), c.title, c.company, c.mobile ? "Cell: " + c.mobile : "", c.office ? "Office: " + c.office : "",
+    ...(c.phones || []).map((p) => (p.label || "Phone") + ": " + p.number), c.email ? "Email: " + c.email : "", addr, c.website].filter((x) => x && String(x).trim()).join("\n");
+}
+const fileBase = (c) => (personName(c) || c.company || "contact").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
+$("dShare").onclick = () => { $("shareWho").textContent = [personName(current), current.company].filter(Boolean).join(" · "); raise($("share")); };
+$("shareClose").onclick = () => closeSheet("share");
+$("shareCard").onclick = async () => {
+  const c = current, file = new File([vcardOf(c)], fileBase(c) + ".vcf", { type: "text/vcard" });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: fullName(c), text: textOf(c) }); return; }
+  } catch (err) { if (err && err.name === "AbortError") return; }
+  // No share menu (most computers): download the card to attach
+  const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+  toast("Contact card downloaded. Attach it to an email or text.");
+};
+$("shareEmail").onclick = () => {
+  const c = current, body = "Here's the contact info for " + (personName(c) || c.company) + ":\n\n" + textOf(c) + "\n";
+  location.href = "mailto:?subject=" + encodeURIComponent("Contact: " + [personName(c), c.company].filter(Boolean).join(", ")) + "&body=" + encodeURIComponent(body);
+};
+$("shareText").onclick = () => {
+  const c = current, body = textOf(c), ios = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  location.href = "sms:" + (ios ? "&" : "?") + "body=" + encodeURIComponent(body);
+};
+$("shareVcf").onclick = () => { const c = current, a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([vcardOf(c)], { type: "text/vcard" })); a.download = fileBase(c) + ".vcf"; document.body.appendChild(a); a.click(); a.remove(); };
+$("shareCsv").onclick = () => {
+  const c = current, head = ["First", "Last", "Title", "Company", "Email", "Mobile", "Office", "Other phones", "Website", "Address", "City", "State", "Zip"];
+  const row = [c.first, c.last, c.title, c.company, c.email, c.mobile, c.office, fmtPhones(c), c.website, c.address, c.city, c.state, c.zip];
+  download(fileBase(c) + ".csv", [head, row].map((r) => r.map(csvCell).join(",")).join("\r\n"));
+};
+
 $("dLeft").onclick = async () => {
   if (current.status === "left") {
     try { const { contact } = await api(`contacts/${encodeURIComponent(current.id)}/restore`, { method: "POST", body: { shard: current.shard } }); upsertLocal(contact); openDetail(contact.id); toast("Marked active again"); } catch (err) { toast(err.message); }
